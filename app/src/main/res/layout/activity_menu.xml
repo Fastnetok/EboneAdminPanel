@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#FFFFFF">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="90dp"
+            android:background="#0D47A1"
+            android:gravity="center"
+            android:text="ADMIN MENU"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/menuAddComplaint"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="New Complaint"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuPendingDevices"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Pending Devices"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuAllEmployees"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="All Employees"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuGeoFence"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Geo Fence TEST"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuLiveTracking"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Live Tracking"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuComplaints"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Complaints"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuAssignedComplaints"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Assigned Complaints"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuReports"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Reports"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuSettings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Settings"
+            android:textSize="18sp"/>
+
+    </LinearLayout>
+
+</ScrollView>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="6dp"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#FFFFFF">
+
+    <TextView
+        android:id="@+id/employeeNameText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Abbas"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="#000000"/>
+
+    <TextView
+        android:id="@+id/userIdText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="abid"
+        android:textSize="16sp"/>
+
+    <TextView
+        android:id="@+id/addressText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Bazaar"/>
+
+    <TextView
+        android:id="@+id/phoneText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="03004561236"/>
+
+    <TextView
+        android:id="@+id/assignedText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Assigned: 14 Jun 2026 / 09:15 AM"
+        android:textStyle="bold"/>
+
+    <TextView
+        android:id="@+id/runningTimeText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Running: 2 Hours"
+        android:textColor="#FB8C00"
+        android:textStyle="bold"/>
+
+</LinearLayout>

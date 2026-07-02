@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/deviceIdText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Device ID" />
+
+        <TextView
+            android:id="@+id/androidIdText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Android ID" />
+
+        <TextView
+            android:id="@+id/deviceNameText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Device Name" />
+
+        <EditText
+            android:id="@+id/employeeNameInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Employee Name" />
+
+        <EditText
+            android:id="@+id/employeeMobileInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Mobile Number" />
+
+        <EditText
+            android:id="@+id/employeeCnicInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="CNIC Number" />
+
+        <EditText
+            android:id="@+id/employeeAddressInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Address" />
+
+        <EditText
+            android:id="@+id/designationInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Designation" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Pending" />
+
+        <Button
+            android:id="@+id/approveButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Approve" />
+
+        <Button
+            android:id="@+id/deleteButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Delete" />
+
+        <Button
+            android:id="@+id/blockButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Block" />
+
+    </LinearLayout>
+
+</ScrollView>

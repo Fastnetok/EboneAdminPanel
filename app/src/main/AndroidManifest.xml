@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.EboneAdminPanel">
+
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyBo1bsDO5BIGU8Mt-u_xYfzeN4Ez1BFW84" />
+
+        <activity
+            android:name=".ApprovedDevicesActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PendingDevicesActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".MenuActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".AllEmployeesActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".EmployeeDetailsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".MapActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PendingComplaintsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".GeoFenceActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AssignedComplaintsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ReportsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AssignComplaintsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".GeoFenceManagementActivity"
+            android:exported="false" />
+        <activity
+            android:name=".AddComplaintActivity"
+            android:exported="false" />
+        <activity
+            android:name=".WebViewLoginActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TotalComplaintsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".EmployeeComplaintsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PendingSummaryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ProgressActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PendingEmployeeComplaintsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ResolvedSummaryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ResolvedEmployeeComplaintsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ManagementToolsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SearchActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ExportActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".FilterActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.EboneAdminPanel">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+    </application>
+
+</manifest>
