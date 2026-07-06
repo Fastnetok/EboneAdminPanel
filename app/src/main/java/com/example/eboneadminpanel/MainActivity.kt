@@ -12,9 +12,7 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.firebase.database.*
-import android.widget.Toast
-import com.example.eboneadminpanel.core.SessionManager
-import com.example.eboneadminpanel.superadmin.companymanager.CompanyManagerActivity
+
 class MainActivity : AppCompatActivity(),
     OnMapReadyCallback {
 
@@ -33,16 +31,6 @@ class MainActivity : AppCompatActivity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val sessionManager = SessionManager(this)
-        val companyId = sessionManager.getActiveCompanyId()
-
-        if (companyId.isNullOrBlank()) {
-            Toast.makeText(this, "Pehle ek Company select karein", Toast.LENGTH_SHORT).show()
-            startActivity(Intent(this, CompanyManagerActivity::class.java))
-            finish()
-            return
-        }
 
         setContentView(R.layout.activity_admin_dashboard)
 
