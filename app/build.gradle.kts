@@ -49,6 +49,9 @@ android {
 
 dependencies {
 
+    implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
+    implementation("com.google.firebase:firebase-firestore-ktx:24.10.1")
+
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
 
     implementation("com.google.firebase:firebase-database")
@@ -85,6 +88,7 @@ dependencies {
     implementation(
         libs.androidx.activity.compose
     )
+    implementation(libs.androidx.activity.ktx)
 
     implementation(
         libs.androidx.compose.material3
@@ -101,6 +105,7 @@ dependencies {
     implementation(
         libs.androidx.compose.ui.tooling.preview
     )
+    implementation(libs.androidx.constraintlayout)
 
     implementation(
         libs.androidx.core.ktx
@@ -109,6 +114,7 @@ dependencies {
     implementation(
         libs.androidx.lifecycle.runtime.ktx
     )
+    implementation(libs.material)
 
     testImplementation(
         libs.junit
