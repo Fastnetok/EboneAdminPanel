@@ -64,6 +64,9 @@
             android:name=".FuelSettingsActivity"
             android:exported="false" />
         <activity
+            android:name=".FuelLogActivity"
+            android:exported="false" />
+        <activity
             android:name=".AssignComplaintsActivity"
             android:exported="false" />
         <activity

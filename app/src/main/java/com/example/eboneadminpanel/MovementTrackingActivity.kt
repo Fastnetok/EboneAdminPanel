@@ -133,18 +133,26 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    // NEW: hamburger popup with a single item — "Fuel Settings"
+    // NEW: hamburger popup — "Fuel Settings" + "Fuel Log"
     private fun showHamburgerMenu(anchor: android.view.View) {
         val popup = android.widget.PopupMenu(this, anchor)
         popup.menu.add(0, 1, 0, "Fuel Settings")
+        popup.menu.add(0, 2, 1, "Fuel Log")
         popup.setOnMenuItemClickListener { item ->
-            if (item.itemId == 1) {
-                startActivity(
-                    android.content.Intent(this, FuelSettingsActivity::class.java)
-                )
-                true
-            } else {
-                false
+            when (item.itemId) {
+                1 -> {
+                    startActivity(
+                        android.content.Intent(this, FuelSettingsActivity::class.java)
+                    )
+                    true
+                }
+                2 -> {
+                    startActivity(
+                        android.content.Intent(this, FuelLogActivity::class.java)
+                    )
+                    true
+                }
+                else -> false
             }
         }
         popup.show()
@@ -368,6 +376,22 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
+    // Writes one entry to the transaction history log for this employee
+    private fun logFuelTransaction(employeeId: String, amount: Double, type: String, newBalance: Double) {
+        val entry = hashMapOf(
+            "amount" to amount,
+            "type" to type,
+            "newBalance" to newBalance,
+            "timestamp" to System.currentTimeMillis()
+        )
+        FirebaseDatabase.getInstance()
+            .getReference("fuelWallet")
+            .child(employeeId)
+            .child("transactions")
+            .push()
+            .setValue(entry)
+    }
+
     // ---------- Fuel Wallet (running balance per employee) ----------
 
     private fun loadWalletBalance(employeeId: String, callback: (Double) -> Unit) {
@@ -417,6 +441,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                         .child("balance")
                         .setValue(newBalance)
                     deductedRef.setValue(todayCost)
+                    logFuelTransaction(employeeId, -todayCost, "Auto-Deduction", newBalance)
                     updateFuelBarDisplay(newBalance, bikeAverage)
                 }
             }
@@ -474,6 +499,8 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                             .setValue(newBalance)
                             .addOnSuccessListener {
                                 val actionWord = if (amount > 0) "added" else "reverted"
+                                val logType = if (amount > 0) "Add" else "Revert"
+                                logFuelTransaction(employeeId, amount, logType, newBalance)
                                 Toast.makeText(
                                     this,
                                     "Rs %.0f %s. New balance: Rs %.0f".format(kotlin.math.abs(amount), actionWord, newBalance),
