@@ -27,24 +27,14 @@ class MenuActivity : AppCompatActivity() {
                 R.id.menuAllEmployees
             )
 
-        val geoFence =
-            findViewById<TextView>(
-                R.id.menuGeoFence
-            )
-
-        val complaints =
-            findViewById<TextView>(
-                R.id.menuComplaints
-            )
-
-        val assignedComplaints =
-            findViewById<TextView>(
-                R.id.menuAssignedComplaints
-            )
-
         val reports =
             findViewById<TextView>(
                 R.id.menuReports
+            )
+
+        val movementTracking =
+            findViewById<TextView>(
+                R.id.menuMovementTracking
             )
 
         val settings =
@@ -62,42 +52,22 @@ class MenuActivity : AppCompatActivity() {
             )
         }
 
-        geoFence.setOnClickListener {
-
-            startActivity(
-                Intent(
-                    this,
-                    GeoFenceManagementActivity::class.java
-                )
-            )
-        }
-
-        complaints.setOnClickListener {
-
-            startActivity(
-                Intent(
-                    this,
-                    PendingComplaintsActivity::class.java
-                )
-            )
-        }
-
-        assignedComplaints.setOnClickListener {
-
-            startActivity(
-                Intent(
-                    this,
-                    AssignedComplaintsActivity::class.java
-                )
-            )
-        }
-
         reports.setOnClickListener {
 
             startActivity(
                 Intent(
                     this,
                     ReportsActivity::class.java
+                )
+            )
+        }
+
+        movementTracking.setOnClickListener {
+
+            startActivity(
+                Intent(
+                    this,
+                    MovementTrackingActivity::class.java
                 )
             )
         }

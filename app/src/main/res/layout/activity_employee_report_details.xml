@@ -1,18 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:background="#ECEFF1">
 
     <TextView
         android:id="@+id/employeeNameText"
         android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:background="#455A64"
+        android:gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/summaryText"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Employee Name"
-        android:textSize="24sp"
-        android:textStyle="bold"/>
+        android:background="#FFEBEE"
+        android:padding="12dp"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="#C62828" />
+
+    <EditText
+        android:id="@+id/searchDetailEditText"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_margin="8dp"
+        android:hint="🔍 Search employee / area"
+        android:padding="12dp"
+        android:background="#FFFFFF" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/detailRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
 </LinearLayout>

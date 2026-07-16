@@ -55,6 +55,15 @@
             android:name=".ReportsActivity"
             android:exported="false" />
         <activity
+            android:name=".EmployeeReportDetailsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".MovementTrackingActivity"
+            android:exported="false" />
+        <activity
+            android:name=".FuelSettingsActivity"
+            android:exported="false" />
+        <activity
             android:name=".AssignComplaintsActivity"
             android:exported="false" />
         <activity

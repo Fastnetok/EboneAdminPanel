@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Full-bleed map, behind everything -->
+    <fragment
+        android:id="@+id/movementMap"
+        android:name="com.google.android.gms.maps.SupportMapFragment"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Floating header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginTop="40dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:background="@drawable/bg_glass_panel"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/movementBackButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="☰"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="MOVEMENT TRACKING"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Floating Employee / Time / Fuel bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginTop="100dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:background="@drawable/bg_glass_panel"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="8dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="2dp"
+            android:text="👤"
+            android:textSize="11sp" />
+
+        <Spinner
+            android:id="@+id/employeeSpinner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="48dp"
+            android:maxWidth="68dp"
+            android:background="@null"
+            android:popupBackground="#FFFFFF" />
+
+        <!-- Equal-weight spacer -> pushes Date toward the center -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="2dp"
+            android:text="📅"
+            android:textSize="11sp" />
+
+        <Spinner
+            android:id="@+id/timeRangeSpinner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="46dp"
+            android:maxWidth="72dp"
+            android:background="@null"
+            android:popupBackground="#FFFFFF" />
+
+        <!-- Equal-weight spacer -> pushes Fuel toward the right, keeping
+             Date visually centered between Employee and Fuel -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:text="⛽"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/fuelStatText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Rs 0"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <!-- Trailing spacer -> shifts both Date and Fuel slightly left
+             (since space is now shared 3 ways instead of pushing content
+             all the way to the edge), and reserves room on the right for
+             the amount to grow to 5 digits without ever needing to touch
+             this layout again -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+    </LinearLayout>
+
+    <!-- Floating right-side buttons -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="170dp"
+        android:layout_marginEnd="14dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/recenterButton"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/bg_glass_circle"
+            android:gravity="center"
+            android:text="🧭"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/toggleMapTypeButton"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_glass_circle"
+            android:gravity="center"
+            android:text="🗺"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/actualFuelButton"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_glass_circle"
+            android:gravity="center"
+            android:text="💵"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+    <!-- Floating Movement Points panel -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="76dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:background="@drawable/bg_glass_panel"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:text="📋"
+                android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="MOVEMENT POINTS"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/distanceStatText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0 km"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="·"
+                android:textColor="#B0BEC5"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/hoursStatText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="0h 0m"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/actualFuelCompareText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text=""
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="6dp"
+            android:background="#26FFFFFF" />
+
+        <!-- Fixed-height container: RecyclerView uses match_parent height here,
+             which is the safest possible pattern (no weight, no wrap_content
+             inside a scroller) — avoids the earlier "only one card shows" bug
+             entirely, since height is never ambiguous. -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="180dp">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/movementPointsRecyclerView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/noMovementDataText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:text="No movement data available.\nClick on Show Movement to start."
+                android:textColor="#B0BEC5"
+                android:textSize="12sp" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- Floating bottom action buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="14dp"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/showMovementButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_glass_panel"
+            android:gravity="center"
+            android:padding="13dp"
+            android:text="👁  SHOW MOVEMENT"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/playMovementButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/bg_glass_panel"
+            android:gravity="center"
+            android:padding="13dp"
+            android:text="▶  PLAY MOVEMENT"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+</FrameLayout>

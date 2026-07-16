@@ -48,48 +48,21 @@
             android:textSize="18sp"/>
 
         <TextView
-            android:id="@+id/menuGeoFence"
-            android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:gravity="center_vertical"
-            android:paddingStart="20dp"
-            android:text="Geo Fence TEST"
-            android:textSize="18sp"/>
-
-        <TextView
-            android:id="@+id/menuLiveTracking"
-            android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:gravity="center_vertical"
-            android:paddingStart="20dp"
-            android:text="Live Tracking"
-            android:textSize="18sp"/>
-
-        <TextView
-            android:id="@+id/menuComplaints"
-            android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:gravity="center_vertical"
-            android:paddingStart="20dp"
-            android:text="Complaints"
-            android:textSize="18sp"/>
-
-        <TextView
-            android:id="@+id/menuAssignedComplaints"
-            android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:gravity="center_vertical"
-            android:paddingStart="20dp"
-            android:text="Assigned Complaints"
-            android:textSize="18sp"/>
-
-        <TextView
             android:id="@+id/menuReports"
             android:layout_width="match_parent"
             android:layout_height="55dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
             android:text="Reports"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuMovementTracking"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Movement Tracking"
             android:textSize="18sp"/>
 
         <TextView

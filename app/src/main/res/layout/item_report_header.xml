@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/topEmployeeText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="5dp"
+        android:background="#FFF8E1"
+        android:padding="15dp"
+        android:text="🏆 TOP EMPLOYEES"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/overallSummaryText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="5dp"
+        android:background="#E3F2FD"
+        android:padding="15dp"
+        android:text="📅 TODAY REPORT"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/repeatReportText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="5dp"
+        android:background="#FFEBEE"
+        android:padding="15dp"
+        android:text="⚠️ REPEAT COMPLAINTS"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/areaReportText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="5dp"
+        android:background="#E0F7FA"
+        android:padding="15dp"
+        android:text="📍 AREA-WISE COMPLAINTS"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+</LinearLayout>

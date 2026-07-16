@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#ECEFF1">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:background="#0D47A1"
+            android:gravity="center"
+            android:text="FUEL SETTINGS"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- Petrol Price Section -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#FFFFFF"
+            android:layout_margin="12dp"
+            android:padding="16dp"
+            android:elevation="2dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="⛽ Petrol Price (Rs per litre)"
+                android:textStyle="bold"
+                android:textSize="15sp"
+                android:textColor="#212121" />
+
+            <EditText
+                android:id="@+id/fuelPriceEditText"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="8dp"
+                android:hint="e.g. 280"
+                android:inputType="numberDecimal"
+                android:padding="12dp"
+                android:background="#F5F5F5" />
+
+            <Button
+                android:id="@+id/saveFuelPriceButton"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="10dp"
+                android:text="SAVE PRICE"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#0D47A1" />
+
+        </LinearLayout>
+
+        <!-- Bike Average Section -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#FFFFFF"
+            android:layout_margin="12dp"
+            android:padding="16dp"
+            android:elevation="2dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🏍 Employee Bike Average"
+                android:textStyle="bold"
+                android:textSize="15sp"
+                android:textColor="#212121" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Select Employee"
+                android:textSize="13sp"
+                android:textColor="#616161"
+                android:layout_marginTop="10dp" />
+
+            <Spinner
+                android:id="@+id/fuelEmployeeSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp"
+                android:background="#F5F5F5" />
+
+            <EditText
+                android:id="@+id/bikeAverageEditText"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="10dp"
+                android:hint="Average in km per litre, e.g. 42"
+                android:inputType="numberDecimal"
+                android:padding="12dp"
+                android:background="#F5F5F5" />
+
+            <Button
+                android:id="@+id/saveBikeAverageButton"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="10dp"
+                android:text="SAVE BIKE AVERAGE"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#0D47A1" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</ScrollView>

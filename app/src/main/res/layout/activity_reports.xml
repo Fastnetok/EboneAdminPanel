@@ -1,137 +1,96 @@
 <?xml version="1.0" encoding="utf-8"?>
-
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:background="#ECEFF1"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:layout_marginTop="50dp"
+        android:background="#455A64"
+        android:gravity="center"
+        android:text="EMPLOYEE REPORTS"
+        android:textColor="#FFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:orientation="horizontal"
+        android:padding="5dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:layout_marginTop="50dp"
-            android:background="#455A64"
-            android:gravity="center"
-            android:text="EMPLOYEE REPORTS"
+        <Button
+            android:id="@+id/todayButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Today"
+            android:textSize="12sp"
             android:textColor="#FFFFFF"
-            android:textSize="22sp"
-            android:textStyle="bold" />
+            android:backgroundTint="#455A64"
+            android:stateListAnimator="@null" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="5dp">
-
-            <Button
-                android:id="@+id/todayButton"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Today" />
-
-            <Button
-                android:id="@+id/weekButton"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Week" />
-
-            <Button
-                android:id="@+id/monthButton"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Month" />
-
-            <Button
-                android:id="@+id/customButton"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
-                android:layout_weight="1"
-                android:text="Custom" />
-
-        </LinearLayout>
-
-        <EditText
-            android:id="@+id/searchEmployeeEditText"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:layout_margin="5dp"
-            android:hint="🔍 Search Employee"
-            android:padding="12dp" />
-
-        <TextView
-            android:id="@+id/topEmployeeText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:background="#FFF8E1"
-            android:padding="15dp"
-            android:text="🏆 TOP EMPLOYEES"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/overallSummaryText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:background="#E3F2FD"
-            android:padding="15dp"
-            android:text="📅 TODAY REPORT"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/weekReportText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:background="#E8F5E9"
-            android:padding="15dp"
-            android:text="📊 WEEK REPORT"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/monthReportText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:background="#F3E5F5"
-            android:padding="15dp"
-            android:text="📈 MONTH REPORT"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/repeatReportText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="5dp"
-            android:background="#FFEBEE"
-            android:padding="15dp"
-            android:text="⚠️ REPEAT COMPLAINTS"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/reportsRecyclerView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:nestedScrollingEnabled="false">
-
-        </androidx.recyclerview.widget.RecyclerView>
+        <Button
+            android:id="@+id/filterButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Filter ▾"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#455A64"
+            android:layout_marginStart="2dp"
+            android:stateListAnimator="@null" />
 
     </LinearLayout>
 
-</ScrollView>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginStart="5dp"
+        android:layout_marginEnd="5dp"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/searchEmployeeEditText"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_weight="1"
+            android:hint="🔍 Search Employee"
+            android:padding="12dp" />
+
+        <Button
+            android:id="@+id/sortToggleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="50dp"
+            android:layout_marginStart="6dp"
+            android:text="🔢 Total"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#455A64"
+            android:stateListAnimator="@null"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <!--
+        IMPORTANT: RecyclerView now owns all scrolling.
+        height=0dp + weight=1 makes it fill remaining space below the
+        fixed header controls above, and it re-measures correctly every
+        time notifyDataSetChanged() runs — this is what fixes the
+        "only one card shows" bug, since there is no parent ScrollView
+        collapsing its height anymore.
+    -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/reportsRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="12dp" />
+
+</LinearLayout>
