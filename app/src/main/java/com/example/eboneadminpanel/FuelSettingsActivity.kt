@@ -54,6 +54,16 @@ class FuelSettingsActivity : AppCompatActivity() {
                     id: Long
                 ) {
                     loadBikeAverageForSelectedEmployee()
+
+                    // Keep both screens in sync — if admin picks a different
+                    // employee here, Movement Tracking should default to the
+                    // same one next time it's opened, too.
+                    if (position in employeeIds.indices) {
+                        getSharedPreferences("MovementTrackingPrefs", MODE_PRIVATE)
+                            .edit()
+                            .putString("selectedEmployeeId", employeeIds[position])
+                            .apply()
+                    }
                 }
 
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -122,6 +132,17 @@ class FuelSettingsActivity : AppCompatActivity() {
                         names
                     )
 
+                    // Default to whichever employee is currently selected in
+                    // Movement Tracking (shared across both screens), instead
+                    // of always defaulting to the first employee in the list —
+                    // so admin doesn't have to re-select the same person again.
+                    val sharedEmployeeId = getSharedPreferences("MovementTrackingPrefs", MODE_PRIVATE)
+                        .getString("selectedEmployeeId", null)
+                    val sharedIndex = employeeIds.indexOf(sharedEmployeeId)
+                    if (sharedIndex >= 0) {
+                        fuelEmployeeSpinner.setSelection(sharedIndex, false)
+                    }
+
                     if (names.isNotEmpty()) {
                         loadBikeAverageForSelectedEmployee()
                     }
@@ -166,13 +187,43 @@ class FuelSettingsActivity : AppCompatActivity() {
             return
         }
 
-        FirebaseDatabase.getInstance()
+        val averageRef = FirebaseDatabase.getInstance()
             .getReference("employees")
             .child(employeeId)
             .child("bikeAverage")
+
+        averageRef
             .setValue(average)
             .addOnSuccessListener {
-                Toast.makeText(this, "Bike average save ho gaya: $average km/L", Toast.LENGTH_SHORT).show()
+                // Read back immediately to confirm it actually landed on the
+                // server (catches silent rejections from Security Rules,
+                // which addOnSuccessListener alone won't always reveal)
+                averageRef.addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val confirmed = snapshot.getValue(Double::class.java)
+                        if (confirmed != null && confirmed == average) {
+                            Toast.makeText(
+                                this@FuelSettingsActivity,
+                                "✅ Bike average save ho gaya: $average km/L",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                this@FuelSettingsActivity,
+                                "⚠️ Save confirm nahi hua (Firebase Rules check karein) — dobara koshish karein",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+
+                    override fun onCancelled(error: DatabaseError) {
+                        Toast.makeText(
+                            this@FuelSettingsActivity,
+                            "⚠️ Confirm nahi ho saka: ${error.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                })
             }
             .addOnFailureListener {
                 Toast.makeText(this, "Save nahi hua, dobara koshish karein", Toast.LENGTH_SHORT).show()

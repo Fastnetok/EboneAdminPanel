@@ -7,10 +7,14 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
 class MovementPointAdapter(
-    private val points: MutableList<MovementPoint>
+    private val points: MutableList<MovementPoint>,
+    private val onItemClick: (Int) -> Unit = {}
 ) : RecyclerView.Adapter<MovementPointAdapter.ViewHolder>() {
 
+    private var highlightedPosition: Int = -1
+
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val rootView: View = view
         val rankBadge: TextView = view.findViewById(R.id.pointRankBadge)
         val timeText: TextView = view.findViewById(R.id.pointTimeText)
         val addressText: TextView = view.findViewById(R.id.pointAddressText)
@@ -35,6 +39,18 @@ class MovementPointAdapter(
 
         holder.timeText.text = TrackingStatistics.formatTime(point.timestamp)
         holder.addressText.text = point.address.ifEmpty { "Loading address..." }
+
+        // Highlight the point currently being animated during Play Movement
+        holder.rootView.setBackgroundColor(
+            if (position == highlightedPosition)
+                android.graphics.Color.parseColor("#332979FF")
+            else
+                android.graphics.Color.TRANSPARENT
+        )
+
+        holder.rootView.setOnClickListener {
+            onItemClick(position)
+        }
     }
 
     override fun getItemCount() = points.size
@@ -42,6 +58,7 @@ class MovementPointAdapter(
     fun replaceAll(newPoints: List<MovementPoint>) {
         points.clear()
         points.addAll(newPoints)
+        highlightedPosition = -1
         notifyDataSetChanged()
     }
 
@@ -50,5 +67,17 @@ class MovementPointAdapter(
             points[position].address = address
             notifyItemChanged(position)
         }
+    }
+
+    // Highlights the point currently reached during Play Movement animation
+    fun setHighlighted(position: Int) {
+        val old = highlightedPosition
+        highlightedPosition = position
+        if (old in points.indices) notifyItemChanged(old)
+        if (position in points.indices) notifyItemChanged(position)
+    }
+
+    fun clearHighlight() {
+        setHighlighted(-1)
     }
 }

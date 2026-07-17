@@ -39,6 +39,8 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var hoursStatText: TextView
     private lateinit var pointsRecyclerView: RecyclerView
     private lateinit var noMovementDataText: TextView
+    private lateinit var movementDetailsContainer: android.view.View
+    private lateinit var movementPanelChevron: TextView
 
     private lateinit var mMap: GoogleMap
     private var mapReady = false
@@ -52,16 +54,28 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
     private val employeeMap = LinkedHashMap<String, Pair<String, Double>>()
     private var fuelPricePerLiter: Double = 0.0
 
-    private val pointAdapter = MovementPointAdapter(mutableListOf())
+    private val pointAdapter = MovementPointAdapter(mutableListOf()) { position ->
+        onListItemTapped(position)
+    }
+    private val waypointMarkers = mutableListOf<Marker>()
     private var filteredPoints: List<MovementPoint> = emptyList() // full set -> polyline + stats
     private var waypoints: List<MovementPoint> = emptyList()      // downsampled -> numbered markers/list
 
     private var playMarker: Marker? = null
+    private var isPlaying = false
+    private var currentPlayIndex = 0
     private val playHandler = Handler(Looper.getMainLooper())
+    private var isMovementPanelExpanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_movement_tracking)
+
+        // Restore the last-selected employee from PERSISTENT storage — this
+        // survives even a full app close (not just backgrounding), so
+        // whichever employee was selected stays selected next time too.
+        val prefs = getSharedPreferences("MovementTrackingPrefs", MODE_PRIVATE)
+        currentEmployeeId = prefs.getString("selectedEmployeeId", null)
 
         employeeSpinner = findViewById(R.id.employeeSpinner)
         timeRangeSpinner = findViewById(R.id.timeRangeSpinner)
@@ -73,6 +87,12 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         hoursStatText = findViewById(R.id.hoursStatText)
         pointsRecyclerView = findViewById(R.id.movementPointsRecyclerView)
         noMovementDataText = findViewById(R.id.noMovementDataText)
+        movementDetailsContainer = findViewById(R.id.movementDetailsContainer)
+        movementPanelChevron = findViewById(R.id.movementPanelChevron)
+
+        findViewById<android.view.View>(R.id.movementPointsHeader).setOnClickListener {
+            toggleMovementPanel()
+        }
 
         // CHANGED: hamburger now opens a small popup menu containing ONLY
         // "Fuel Settings" (per request), instead of just finish()-ing back.
@@ -81,15 +101,17 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
             showHamburgerMenu(anchor)
         }
 
-        findViewById<TextView>(R.id.recenterButton).setOnClickListener {
+        findViewById<android.view.View>(R.id.recenterButton).setOnClickListener {
             recenterMap()
         }
 
-        findViewById<TextView>(R.id.toggleMapTypeButton).setOnClickListener {
+        findViewById<android.view.View>(R.id.toggleMapTypeButton).setOnClickListener {
             toggleMapType()
         }
 
-        findViewById<TextView>(R.id.actualFuelButton).setOnClickListener {
+        // Tapping the Fuel amount itself (top bar) now opens the Add/Revert
+        // dialog, instead of a separate floating 💵 button
+        findViewById<android.view.View>(R.id.fuelTapArea).setOnClickListener {
             showActualFuelDialog()
         }
 
@@ -101,6 +123,14 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         timeRangeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         timeRangeSpinner.adapter = timeRangeAdapter
 
+        // Restore last-selected time range from persistent storage (same
+        // mechanism as the employee selection) — survives full app close
+        val savedRangePosition = getSharedPreferences("MovementTrackingPrefs", MODE_PRIVATE)
+            .getInt("selectedTimeRangePosition", -1)
+        if (savedRangePosition in timeRanges.indices) {
+            timeRangeSpinner.setSelection(savedRangePosition, false)
+        }
+
         timeRangeSpinner.onItemSelectedListener =
             object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(
@@ -109,6 +139,11 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                     position: Int,
                     id: Long
                 ) {
+                    getSharedPreferences("MovementTrackingPrefs", MODE_PRIVATE)
+                        .edit()
+                        .putInt("selectedTimeRangePosition", position)
+                        .apply()
+
                     if (position == 4) { // "Custom Date"
                         showCustomDatePicker()
                     }
@@ -163,6 +198,17 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         mMap.mapType = GoogleMap.MAP_TYPE_SATELLITE
         mapReady = true
         applyPendingDefaultCameraIfReady()
+
+        // Tapping a marker on the map -> scroll + highlight the matching
+        // row in the Movement Points list below, so its time is visible
+        mMap.setOnMarkerClickListener { marker ->
+            val index = waypointMarkers.indexOf(marker)
+            if (index >= 0) {
+                pointsRecyclerView.smoothScrollToPosition(index)
+                pointAdapter.setHighlighted(index)
+            }
+            false // still show the marker's default info window / re-center
+        }
     }
 
     private fun applyPendingDefaultCameraIfReady() {
@@ -199,6 +245,17 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         } else {
             GoogleMap.MAP_TYPE_SATELLITE
         }
+    }
+
+    // Movement Points panel starts collapsed (just the thin header row,
+    // sitting right above Show Movement / Play Movement). Tapping the
+    // header expands it; it auto-collapses again after a few seconds if
+    // left untouched, so it doesn't permanently take up screen space.
+    private fun toggleMovementPanel() {
+        isMovementPanelExpanded = !isMovementPanelExpanded
+        movementDetailsContainer.visibility =
+            if (isMovementPanelExpanded) android.view.View.VISIBLE else android.view.View.GONE
+        movementPanelChevron.text = if (isMovementPanelExpanded) "▲" else "▼"
     }
 
     // ---------- Data loading (employees + fuel price) ----------
@@ -244,6 +301,16 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                     empAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
                     employeeSpinner.adapter = empAdapter
 
+                    // Restore whichever employee was already selected (e.g.
+                    // Kashif) instead of always resetting to position 0 —
+                    // this matters because onResume() reloads this list
+                    // every time the screen becomes visible again.
+                    val idsList = employeeMap.keys.toList()
+                    val previousIndex = idsList.indexOf(currentEmployeeId)
+                    if (previousIndex >= 0) {
+                        employeeSpinner.setSelection(previousIndex, false)
+                    }
+
                     employeeSpinner.onItemSelectedListener =
                         object : android.widget.AdapterView.OnItemSelectedListener {
                             override fun onItemSelected(
@@ -256,6 +323,14 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                                 if (position in ids.indices) {
                                     val empId = ids[position]
                                     currentEmployeeId = empId
+
+                                    // Save persistently so this selection survives
+                                    // even a full app close, not just backgrounding
+                                    getSharedPreferences("MovementTrackingPrefs", MODE_PRIVATE)
+                                        .edit()
+                                        .putString("selectedEmployeeId", empId)
+                                        .apply()
+
                                     val avg = employeeMap[empId]?.second ?: 0.0
                                     loadWalletBalance(empId) { balance ->
                                         updateFuelBarDisplay(balance, avg)
@@ -340,7 +415,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                 return@loadTrackingData
             }
 
-            waypoints = downsamplePoints(cleaned, 10)
+            waypoints = selectSignificantWaypoints(cleaned)
 
             val stats = TrackingStatistics.computeStats(cleaned)
             val fuelUsed = FuelCalculator.fuelUsedLitres(stats.totalDistanceKm, bikeAverage)
@@ -352,6 +427,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
 
             if (bikeAverage <= 0.0 || fuelPricePerLiter <= 0.0) {
                 // Missing config — show WHY instead of a silent "Rs 0"
+                stopFuelBlink()
                 fuelStatText.text = "⚠️ Set"
                 actualFuelCompareText.visibility = android.view.View.GONE
                 val reason = if (bikeAverage <= 0.0)
@@ -360,12 +436,19 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                     "Fuel Price missing hai"
                 Toast.makeText(this, "⚠️ $reason — Fuel Settings mein set karein", Toast.LENGTH_LONG).show()
             } else {
-                // Wallet balance drives the top bar — deduct today's cost
-                // automatically (once only) if "Today" is the selected range
+                // Wallet balance drives the top bar — deduct fuel cost
+                // DYNAMICALLY as the employee covers more distance, for
+                // whichever SINGLE day is being viewed (Today, Yesterday, or
+                // a single Custom Date) — not just literally "Today"
+                val dateKeysForRange = getDateKeysBetween(fromMillis, toMillis)
                 loadWalletBalance(employeeId) { balance ->
-                    if (timeRangeSpinner.selectedItemPosition == 1) { // "Today"
-                        processAutoDeductionForToday(employeeId, fuelCost, balance, bikeAverage)
+                    if (dateKeysForRange.size == 1) {
+                        processAutoDeductionForSingleDay(
+                            employeeId, dateKeysForRange[0], stats.totalDistanceKm, balance, bikeAverage
+                        )
                     } else {
+                        // Multi-day range (Last 7 Days, multi-day Custom) —
+                        // just a historical summary view, no deduction
                         updateFuelBarDisplay(balance, bikeAverage)
                     }
                 }
@@ -410,40 +493,49 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
             })
     }
 
-    // Deducts today's calculated fuel cost from the wallet — but only ONCE
-    // per day, no matter how many times "Show Movement" is clicked for
-    // Today. A "deductedDates" marker prevents double-deduction.
-    private fun processAutoDeductionForToday(
+    // Deducts fuel cost DYNAMICALLY as the employee covers more distance
+    // today. Instead of a one-time "already deducted today" flag, this
+    // tracks the CUMULATIVE km already deducted for that SPECIFIC date —
+    // each time that day is checked, only the NEW distance covered since
+    // the last check gets deducted. Checking again after more movement =
+    // balance drops further. Checking again with no new movement = no
+    // double-charge. Works for Today, Yesterday, or a single Custom Date.
+    private fun processAutoDeductionForSingleDay(
         employeeId: String,
-        todayCost: Double,
+        dateKey: String,
+        totalDistanceKmForDay: Double,
         currentBalance: Double,
         bikeAverage: Double
     ) {
-        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            .format(java.util.Date())
-
-        val deductedRef = FirebaseDatabase.getInstance()
+        val deductedKmRef = FirebaseDatabase.getInstance()
             .getReference("fuelWallet")
             .child(employeeId)
-            .child("deductedDates")
-            .child(todayKey)
+            .child("deductedKm")
+            .child(dateKey)
 
-        deductedRef.addListenerForSingleValueEvent(object : ValueEventListener {
+        deductedKmRef.addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                if (snapshot.exists()) {
-                    // Already deducted today — just show current balance
+                val alreadyDeductedKm = snapshot.getValue(Double::class.java) ?: 0.0
+                val incrementalKm = totalDistanceKmForDay - alreadyDeductedKm
+
+                if (incrementalKm <= 0.01) {
+                    // No meaningful new movement since last check — nothing to deduct
                     updateFuelBarDisplay(currentBalance, bikeAverage)
-                } else {
-                    val newBalance = currentBalance - todayCost
-                    FirebaseDatabase.getInstance()
-                        .getReference("fuelWallet")
-                        .child(employeeId)
-                        .child("balance")
-                        .setValue(newBalance)
-                    deductedRef.setValue(todayCost)
-                    logFuelTransaction(employeeId, -todayCost, "Auto-Deduction", newBalance)
-                    updateFuelBarDisplay(newBalance, bikeAverage)
+                    return
                 }
+
+                val incrementalFuelUsed = FuelCalculator.fuelUsedLitres(incrementalKm, bikeAverage)
+                val incrementalCost = FuelCalculator.fuelCost(incrementalFuelUsed, fuelPricePerLiter)
+                val newBalance = currentBalance - incrementalCost
+
+                FirebaseDatabase.getInstance()
+                    .getReference("fuelWallet")
+                    .child(employeeId)
+                    .child("balance")
+                    .setValue(newBalance)
+                deductedKmRef.setValue(totalDistanceKmForDay)
+                logFuelTransaction(employeeId, -incrementalCost, "Auto-Deduction ($dateKey)", newBalance)
+                updateFuelBarDisplay(newBalance, bikeAverage)
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -453,8 +545,42 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     // Updates the top-bar Rs value + the "remaining km" line under Movement Points
+    // Simple continuous fade in/out blink to draw attention to low balance,
+    // without changing the text color (stays white as requested)
+    private fun startFuelBlink() {
+        if (fuelStatText.animation != null) return // already blinking
+        val anim = android.view.animation.AlphaAnimation(1.0f, 0.25f)
+        anim.duration = 600
+        anim.repeatMode = android.view.animation.Animation.REVERSE
+        anim.repeatCount = android.view.animation.Animation.INFINITE
+        fuelStatText.startAnimation(anim)
+    }
+
+    private fun stopFuelBlink() {
+        fuelStatText.clearAnimation()
+        fuelStatText.alpha = 1.0f
+    }
+
     private fun updateFuelBarDisplay(balance: Double, bikeAverage: Double) {
         fuelStatText.text = "Rs %.0f".format(balance)
+        fuelStatText.setTextColor(android.graphics.Color.parseColor("#FFFFFF")) // stays white always
+
+        // Low fuel warning — keeps appearing every time the fuel display
+        // refreshes (employee selected, Show Movement clicked, funds
+        // added, etc.) as long as balance stays at/below the threshold,
+        // so it can't be missed or forgotten. Text blinks instead of
+        // changing color, per request.
+        val lowBalanceThreshold = 100.0
+        if (balance <= lowBalanceThreshold) {
+            startFuelBlink()
+            Toast.makeText(
+                this,
+                "⚠️ Low Fuel Balance: Rs %.0f left — please add funds".format(balance),
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            stopFuelBlink()
+        }
 
         if (bikeAverage > 0.0 && fuelPricePerLiter > 0.0 && balance > 0.0) {
             val remainingLitres = balance / fuelPricePerLiter
@@ -521,6 +647,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private fun clearMapAndStats() {
         if (mapReady) mMap.clear()
+        stopFuelBlink()
         distanceStatText.text = "0 km"
         fuelStatText.text = "Rs 0"
         actualFuelCompareText.visibility = android.view.View.GONE
@@ -662,6 +789,202 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
     // ~10 numbered waypoints are shown/reverse-geocoded, matching the
     // approved mockup style) ----------
 
+    // Tapping a row in the Movement Points list -> jump the map camera to
+    // that point's location and show its marker (reverse of marker-tap sync)
+    private fun onListItemTapped(position: Int) {
+        if (position !in waypoints.indices || !mapReady) return
+        val point = waypoints[position]
+        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(point.lat, point.lng), 17f))
+        pointAdapter.setHighlighted(position)
+        waypointMarkers.getOrNull(position)?.showInfoWindow()
+    }
+
+    // ---------- Smart waypoint selection ----------
+    // Instead of naively picking 10 evenly-spaced points, this walks through
+    // the FULL point list and marks only genuinely meaningful moments:
+    //   • Stop  (5+ min stationary)  -> arrival marker + departure marker
+    //   • U-turn (sharp bearing change) -> one marker
+    //   • Long continuous travel     -> one marker every ~5km
+    // Then de-duplicates anything too close together (avoids clusters of
+    // near-identical markers piling up at the same spot).
+
+    private fun selectSignificantWaypoints(points: List<MovementPoint>): List<MovementPoint> {
+        if (points.size <= 2) return points
+
+        val stationaryRadiusMeters = 30.0
+
+        // ---- PASS 1: figure out vehicle type from MOVING-only average speed
+        // (stationary periods excluded, so long stops don't skew this) ----
+        var movingDistanceMeters = 0.0
+        var movingTimeMs = 0L
+        for (i in 1 until points.size) {
+            val prev = points[i - 1]
+            val curr = points[i]
+            val distance = DistanceCalculator.distanceBetween(prev.lat, prev.lng, curr.lat, curr.lng)
+            if (distance >= stationaryRadiusMeters) {
+                movingDistanceMeters += distance
+                movingTimeMs += (curr.timestamp - prev.timestamp)
+            }
+        }
+        val movingHours = movingTimeMs / 3_600_000.0
+        val avgMovingSpeedKmh = if (movingHours > 0) (movingDistanceMeters / 1000.0) / movingHours else 0.0
+
+        // Walking ≤8 km/h, Motorbike 8–80 km/h, Car >80 km/h — spacing scales accordingly
+        var sequenceIntervalMeters = when {
+            avgMovingSpeedKmh <= 8.0 -> 1000.0   // ~every 1km on foot
+            avgMovingSpeedKmh > 80.0 -> 9000.0   // ~every 9km at car/highway speed
+            else -> 5000.0                        // ~every 5km at motorbike speed
+        }
+
+        // For SHORT trips, the vehicle-based interval above would never
+        // trigger even once (e.g. a 0.3km trip vs a 1km walking interval),
+        // leaving no in-between markers at all. Scale it down so short
+        // trips still get a few intermediate markers along the route.
+        if (movingDistanceMeters > 0 && movingDistanceMeters < sequenceIntervalMeters * 2) {
+            sequenceIntervalMeters = (movingDistanceMeters / 3.0).coerceAtLeast(100.0)
+        }
+
+        // ---- PASS 2: stops (tiered by duration), U-turns, sequence markers ----
+        val briefPauseMinMs = 10_000L        // below this = GPS noise, ignore
+        val briefPauseMaxMs = 90_000L        // 10–90 sec = traffic-light-like pause
+        val shortStopMaxMs = 5 * 60 * 1000L  // 90sec–5min = toll plaza / quick pickup (1 marker)
+        // 5min+ = real stop like McDonald's/mosque/mall (arrival + departure markers)
+        val moderateTurnThresholdDegrees = 55.0  // visible bend/turn (e.g. road curve) — also catches sharp U-turns
+        val minMarkerSpacingMeters = 80.0
+        val minMarkerSpacingMs = 60_000L
+        val hardCap = 40
+
+        data class BriefPause(val point: MovementPoint)
+
+        val significant = mutableListOf<MovementPoint>()
+        val briefPauses = mutableListOf<BriefPause>()
+        significant.add(points.first()) // trip start
+
+        var stopStartIndex: Int? = null
+        var lastBearing: Double? = null
+        var distanceSinceLastSeqMarker = 0.0
+
+        for (i in 1 until points.size) {
+            val prev = points[i - 1]
+            val curr = points[i]
+            val distance = DistanceCalculator.distanceBetween(prev.lat, prev.lng, curr.lat, curr.lng)
+            val isStationary = distance < stationaryRadiusMeters
+
+            if (isStationary) {
+                if (stopStartIndex == null) stopStartIndex = i - 1
+            } else {
+                if (stopStartIndex != null) {
+                    val stopStart = points[stopStartIndex!!]
+                    val stopDurationMs = prev.timestamp - stopStart.timestamp
+                    when {
+                        stopDurationMs >= shortStopMaxMs -> {
+                            // Real stop (5+ min) — McDonald's, mosque, mall
+                            significant.add(stopStart)  // arrival
+                            significant.add(prev)        // departure
+                        }
+                        stopDurationMs >= briefPauseMaxMs -> {
+                            // Toll plaza / quick pickup (90sec–5min) — just one marker
+                            significant.add(stopStart)
+                        }
+                        stopDurationMs >= briefPauseMinMs -> {
+                            // Traffic-light-like brief pause — hold for cluster check below
+                            briefPauses.add(BriefPause(stopStart))
+                        }
+                        // else: too brief, likely GPS noise — ignore entirely
+                    }
+                    stopStartIndex = null
+                }
+
+                // Turn detection via bearing (direction) change — catches
+                // both moderate bends (road curves) and sharp U-turns,
+                // since the lower threshold naturally covers both cases
+                val bearing = bearingBetween(prev.lat, prev.lng, curr.lat, curr.lng)
+                if (lastBearing != null) {
+                    var delta = kotlin.math.abs(bearing - lastBearing!!)
+                    if (delta > 180) delta = 360 - delta
+                    if (delta > moderateTurnThresholdDegrees) {
+                        significant.add(prev)
+                    }
+                }
+                lastBearing = bearing
+
+                // Vehicle-aware sequence marker during continuous travel
+                distanceSinceLastSeqMarker += distance
+                if (distanceSinceLastSeqMarker >= sequenceIntervalMeters) {
+                    significant.add(curr)
+                    distanceSinceLastSeqMarker = 0.0
+                }
+            }
+        }
+
+        significant.add(points.last()) // trip end
+
+        // ---- Traffic/Rush clustering — 3+ brief pauses close together in
+        // time AND space become ONE "Traffic/Rush" marker instead of many ----
+        val trafficClusterWindowMs = 15 * 60 * 1000L
+        val trafficClusterMinCount = 3
+        val trafficClusterMaxRadiusMeters = 1500.0
+
+        var idx = 0
+        while (idx < briefPauses.size) {
+            val clusterStart = briefPauses[idx]
+            val cluster = mutableListOf(clusterStart)
+            var j = idx + 1
+            while (j < briefPauses.size) {
+                val candidate = briefPauses[j]
+                val timeSinceStart = candidate.point.timestamp - clusterStart.point.timestamp
+                val distFromStart = DistanceCalculator.distanceBetween(
+                    clusterStart.point.lat, clusterStart.point.lng,
+                    candidate.point.lat, candidate.point.lng
+                )
+                if (timeSinceStart <= trafficClusterWindowMs && distFromStart <= trafficClusterMaxRadiusMeters) {
+                    cluster.add(candidate)
+                    j++
+                } else {
+                    break
+                }
+            }
+            if (cluster.size >= trafficClusterMinCount) {
+                // One consolidated "Traffic/Rush" marker for the whole cluster
+                significant.add(cluster[cluster.size / 2].point)
+            }
+            // Isolated/small groups of brief pauses are just noise — skip
+            idx = j
+        }
+
+        // ---- De-duplicate — sort by time, keep only meaningfully spaced points ----
+        val sorted = significant.sortedBy { it.timestamp }
+        val deduped = mutableListOf<MovementPoint>()
+        for (p in sorted) {
+            val last = deduped.lastOrNull()
+            if (last == null) {
+                deduped.add(p)
+            } else {
+                val gapMeters = DistanceCalculator.distanceBetween(last.lat, last.lng, p.lat, p.lng)
+                val gapMs = p.timestamp - last.timestamp
+                if (gapMeters >= minMarkerSpacingMeters || gapMs >= minMarkerSpacingMs) {
+                    deduped.add(p)
+                }
+            }
+        }
+
+        // Safety net for unusually eventful trips
+        return if (deduped.size > hardCap) downsamplePoints(deduped, hardCap) else deduped
+    }
+
+    private fun bearingBetween(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+        val start = android.location.Location("start").apply {
+            latitude = lat1
+            longitude = lng1
+        }
+        val end = android.location.Location("end").apply {
+            latitude = lat2
+            longitude = lng2
+        }
+        val bearing = start.bearingTo(end).toDouble()
+        return if (bearing < 0) bearing + 360 else bearing
+    }
+
     private fun downsamplePoints(points: List<MovementPoint>, maxCount: Int): List<MovementPoint> {
         if (points.size <= maxCount) return points
         val step = (points.size - 1).toDouble() / (maxCount - 1)
@@ -678,6 +1001,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun drawRoute(allPoints: List<MovementPoint>, waypoints: List<MovementPoint>) {
         if (!mapReady) return
         mMap.clear()
+        waypointMarkers.clear()
 
         val polylineOptions = PolylineOptions()
             .color(0xFF0D47A1.toInt()) // app's branding blue
@@ -701,12 +1025,15 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                 else -> com.google.android.gms.maps.model.BitmapDescriptorFactory
                     .defaultMarker(com.google.android.gms.maps.model.BitmapDescriptorFactory.HUE_ORANGE)
             }
-            mMap.addMarker(
+            val marker = mMap.addMarker(
                 MarkerOptions()
                     .position(LatLng(point.lat, point.lng))
                     .title("${index + 1}")
                     .icon(icon)
             )
+            // Keep this list in the SAME order/index as waypoints, so tapping
+            // a marker can be matched back to its list row (and vice versa)
+            if (marker != null) waypointMarkers.add(marker)
         }
 
         try {
@@ -722,6 +1049,14 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         noMovementDataText.visibility = android.view.View.GONE
         pointAdapter.replaceAll(waypoints)
 
+        // Fresh data loaded — reset any in-progress play/pause state
+        isPlaying = false
+        currentPlayIndex = 0
+        playMovementButton.text = "▶  PLAY MOVEMENT"
+        playHandler.removeCallbacksAndMessages(null)
+        playMarker?.remove()
+        playMarker = null
+
         Thread {
             for (i in waypoints.indices) {
                 val point = waypoints[i]
@@ -733,7 +1068,7 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         }.start()
     }
 
-    // ---------- Play Movement (simple step animation along waypoints) ----------
+    // ---------- Play Movement (Play/Pause toggle, synced with list) ----------
 
     private fun playMovementAnimation() {
         if (!mapReady || waypoints.isEmpty()) {
@@ -741,18 +1076,50 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
             return
         }
 
-        playMarker?.remove()
-        playMarker = mMap.addMarker(
-            MarkerOptions()
-                .position(LatLng(waypoints[0].lat, waypoints[0].lng))
-                .title("🏍 Moving")
-        )
+        if (isPlaying) {
+            // Currently playing -> PAUSE (keep position, stop scheduling further steps)
+            isPlaying = false
+            playHandler.removeCallbacksAndMessages(null)
+            playMovementButton.text = "▶  PLAY MOVEMENT"
+            return
+        }
 
-        animateStep(0)
+        // Not playing -> START (or RESUME from currentPlayIndex)
+        isPlaying = true
+        playMovementButton.text = "⏸  PAUSE"
+
+        if (playMarker == null || currentPlayIndex == 0) {
+            playMarker?.remove()
+            playMarker = mMap.addMarker(
+                MarkerOptions()
+                    .position(LatLng(waypoints[0].lat, waypoints[0].lng))
+                    .title("🏍 Moving")
+            )
+            currentPlayIndex = 0
+        }
+
+        animateStep(currentPlayIndex)
     }
 
     private fun animateStep(index: Int) {
-        if (index >= waypoints.size - 1) return
+        if (!isPlaying) return // paused mid-way — stop scheduling further steps
+
+        if (index >= waypoints.size - 1) {
+            // Reached the end — reset to allow replay from the start next time
+            isPlaying = false
+            currentPlayIndex = 0
+            playMovementButton.text = "▶  PLAY MOVEMENT"
+            pointAdapter.clearHighlight()
+            return
+        }
+
+        currentPlayIndex = index
+
+        // Keep the Movement Points list in sync — scroll to and highlight
+        // whichever point the marker is currently animating towards, so
+        // admin can see the corresponding time as it plays.
+        pointsRecyclerView.smoothScrollToPosition(index)
+        pointAdapter.setHighlighted(index)
 
         val start = LatLng(waypoints[index].lat, waypoints[index].lng)
         val end = LatLng(waypoints[index + 1].lat, waypoints[index + 1].lng)
@@ -763,6 +1130,8 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
 
         val runnable = object : Runnable {
             override fun run() {
+                if (!isPlaying) return // paused mid-step
+
                 if (currentStep > steps) {
                     animateStep(index + 1)
                     return
@@ -779,8 +1148,19 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         playHandler.post(runnable)
     }
 
+    // Refreshes employee list (with latest bikeAverage) + fuel price every
+    // time this screen becomes visible again — fixes the "stale cache" bug
+    // where going to Fuel Settings and coming back showed OLD values,
+    // even though Firebase itself had the correct new ones.
+    override fun onResume() {
+        super.onResume()
+        loadEmployeeList()
+        loadFuelPrice()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         playHandler.removeCallbacksAndMessages(null)
+        stopFuelBlink()
     }
 }
