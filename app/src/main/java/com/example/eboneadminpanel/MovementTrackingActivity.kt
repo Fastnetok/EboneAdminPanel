@@ -168,11 +168,12 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    // NEW: hamburger popup — "Fuel Settings" + "Fuel Log"
+    // NEW: hamburger popup — "Fuel Settings" + "Fuel Log" + "Fuel Test Calculator"
     private fun showHamburgerMenu(anchor: android.view.View) {
         val popup = android.widget.PopupMenu(this, anchor)
         popup.menu.add(0, 1, 0, "Fuel Settings")
         popup.menu.add(0, 2, 1, "Fuel Log")
+        popup.menu.add(0, 3, 2, "Fuel Test Calculator")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> {
@@ -187,10 +188,130 @@ class MovementTrackingActivity : AppCompatActivity(), OnMapReadyCallback {
                     )
                     true
                 }
+                3 -> {
+                    showFuelTestCalculatorDialog()
+                    true
+                }
                 else -> false
             }
         }
         popup.show()
+    }
+
+    // ---------- Fuel Test Calculator (standalone, NOT saved to Firebase) ----------
+    // Lets admin plug in any amount / price / average — for any vehicle type
+    // (car, bike, truck, jeep) — just to quickly check "what mileage would
+    // this give?". Pure local math, one-time, never touches the real Fuel
+    // Wallet, deductedKm tracking, or Firebase at all. The real auto-deduction
+    // logic above (onShowMovementClicked / processAutoDeductionForSingleDay)
+    // is completely untouched by this.
+    private fun showFuelTestCalculatorDialog() {
+        val container = android.widget.LinearLayout(this)
+        container.orientation = android.widget.LinearLayout.VERTICAL
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        container.setPadding(pad, pad, pad, 0)
+
+        val amountInput = android.widget.EditText(this)
+        amountInput.hint = "Fuel amount (Rs) — e.g. 4000"
+        amountInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+
+        val priceInput = android.widget.EditText(this)
+        priceInput.hint = "Price per litre (Rs) — e.g. 318"
+        priceInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+
+        val averageInput = android.widget.EditText(this)
+        averageInput.hint = "Average (km per litre) — e.g. 15"
+        averageInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+
+        val distanceInput = android.widget.EditText(this)
+        distanceInput.hint = "Distance to travel (km) — e.g. 37"
+        distanceInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+
+        val resultText = TextView(this)
+        resultText.setPadding(0, pad, 0, 0)
+        resultText.textSize = 15f
+
+        val distanceResultText = TextView(this)
+        distanceResultText.setPadding(0, pad / 2, 0, 0)
+        distanceResultText.textSize = 15f
+
+        container.addView(amountInput)
+        container.addView(priceInput)
+        container.addView(averageInput)
+        container.addView(resultText)
+        container.addView(distanceInput)
+        container.addView(distanceResultText)
+
+        fun recalculate() {
+            val amount = amountInput.text.toString().trim().toDoubleOrNull()
+            val price = priceInput.text.toString().trim().toDoubleOrNull()
+            val average = averageInput.text.toString().trim().toDoubleOrNull()
+
+            if (amount == null || price == null || average == null ||
+                amount <= 0 || price <= 0 || average <= 0
+            ) {
+                resultText.text = "Enter all 3 values to see the result"
+            } else {
+                // Same formula as FuelCalculator, used purely for this local
+                // test — nothing here is written back to Firebase.
+                val litres = amount / price
+                val estimatedKm = litres * average
+                resultText.text = "≈ %.2f litres\n≈ %.0f km on Rs %.0f".format(litres, estimatedKm, amount)
+            }
+
+            val distance = distanceInput.text.toString().trim().toDoubleOrNull()
+            if (price == null || average == null || price <= 0 || average <= 0 ||
+                distance == null || distance <= 0
+            ) {
+                distanceResultText.text = ""
+            } else {
+                // Reverse direction: how much fuel (Rs) is needed to cover
+                // a given distance, at this price and average
+                val litresNeeded = distance / average
+                val costNeeded = litresNeeded * price
+                distanceResultText.text = "For %.0f km: ≈ %.2f litres ≈ Rs %.0f needed".format(distance, litresNeeded, costNeeded)
+            }
+        }
+
+        val watcher = object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) = recalculate()
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+        }
+        amountInput.addTextChangedListener(watcher)
+        priceInput.addTextChangedListener(watcher)
+        averageInput.addTextChangedListener(watcher)
+        distanceInput.addTextChangedListener(watcher)
+
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("Fuel Test Calculator")
+            .setView(container)
+            .setNegativeButton("Reset", null)
+            .setPositiveButton("Close", null)
+            .create()
+
+        // Override the Reset button's click so it clears the fields
+        // WITHOUT dismissing the dialog (default AlertDialog behavior
+        // dismisses on any button tap) — lets the admin run another
+        // test right away. Using NEGATIVE (not NEUTRAL) so it sits right
+        // next to Close instead of in the opposite corner.
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                amountInput.setText("")
+                priceInput.setText("")
+                averageInput.setText("")
+                distanceInput.setText("")
+                resultText.text = ""
+                distanceResultText.text = ""
+                amountInput.requestFocus()
+            }
+        }
+
+        dialog.show()
     }
 
     override fun onMapReady(googleMap: GoogleMap) {

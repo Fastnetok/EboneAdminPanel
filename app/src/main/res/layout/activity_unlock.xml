@@ -9,46 +9,49 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Ebone Admin Login"
-        android:textSize="22sp"
+        android:text="Ebone Admin — Locked"
+        android:textSize="20sp"
         android:textStyle="bold"
         android:layout_marginBottom="24dp" />
 
-    <EditText
-        android:id="@+id/emailInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Email"
-        android:inputType="textEmailAddress" />
+    <ImageButton
+        android:id="@+id/fingerprintButton"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:src="@android:drawable/ic_lock_idle_lock"
+        android:background="@null"
+        android:contentDescription="Fingerprint unlock"
+        android:layout_marginBottom="24dp" />
 
     <EditText
-        android:id="@+id/passwordInput"
+        android:id="@+id/unlockPinInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Password"
-        android:inputType="textPassword"
-        android:layout_marginTop="12dp" />
+        android:hint="PIN"
+        android:inputType="numberPassword"
+        android:maxLength="6" />
 
     <Button
-        android:id="@+id/loginButton"
+        android:id="@+id/unlockButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Login"
-        android:layout_marginTop="16dp" />
+        android:text="Unlock"
+        android:layout_marginTop="12dp" />
 
     <TextView
-        android:id="@+id/statusText"
+        android:id="@+id/unlockStatusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:textColor="#D32F2F" />
 
-    <TextView
-        android:id="@+id/forgotPasswordText"
+    <Button
+        android:id="@+id/logoutButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Password bhool gaye?"
+        android:text="Forgot PIN? Logout"
+        android:background="@null"
         android:textColor="#1565C0"
-        android:layout_marginTop="16dp" />
+        android:layout_marginTop="24dp" />
 
 </LinearLayout>

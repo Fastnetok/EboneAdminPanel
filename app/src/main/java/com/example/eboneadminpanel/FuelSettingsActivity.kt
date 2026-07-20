@@ -24,6 +24,15 @@ class FuelSettingsActivity : AppCompatActivity() {
     // employeeId -> employeeName, in the same order as the spinner
     private val employeeIds = mutableListOf<String>()
 
+    // FIX: Guards against the automatic onItemSelected(position=0) callback
+    // that Android fires the instant `spinner.adapter = ...` is set — BEFORE
+    // we get a chance to restore the employee that was actually selected
+    // last time. Without this flag, that spurious event overwrites
+    // SharedPreferences with employee #0, so the spinner (and therefore the
+    // Bike Average field) silently resets to the first employee every time
+    // this screen is opened, making it look like the average was never saved.
+    private var isRestoringSelection = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_fuel_settings)
@@ -53,6 +62,14 @@ class FuelSettingsActivity : AppCompatActivity() {
                     position: Int,
                     id: Long
                 ) {
+                    // FIX: Skip this entirely while we are programmatically
+                    // restoring the previously-selected employee (either the
+                    // automatic position-0 event fired by setting the
+                    // adapter, or our own setSelection(sharedIndex) call
+                    // below). Only a REAL user tap on the spinner should
+                    // update the bike average field and the shared prefs.
+                    if (isRestoringSelection) return
+
                     loadBikeAverageForSelectedEmployee()
 
                     // Keep both screens in sync — if admin picks a different
@@ -126,6 +143,12 @@ class FuelSettingsActivity : AppCompatActivity() {
                         names.add(name)
                     }
 
+                    // FIX: Setting the adapter fires an automatic
+                    // onItemSelected(0) event synchronously on some Android
+                    // versions. Guard it so that spurious event doesn't
+                    // clobber SharedPreferences or trigger a redundant load.
+                    isRestoringSelection = true
+
                     fuelEmployeeSpinner.adapter = ArrayAdapter(
                         this@FuelSettingsActivity,
                         android.R.layout.simple_spinner_dropdown_item,
@@ -143,8 +166,21 @@ class FuelSettingsActivity : AppCompatActivity() {
                         fuelEmployeeSpinner.setSelection(sharedIndex, false)
                     }
 
-                    if (names.isNotEmpty()) {
-                        loadBikeAverageForSelectedEmployee()
+                    // Done restoring — real user taps on the spinner from
+                    // here on will behave normally again.
+                    isRestoringSelection = false
+
+                    // FIX: Don't ask the spinner "who's selected right now?"
+                    // here — right after setSelection(), the Spinner hasn't
+                    // necessarily finished its layout pass yet, so
+                    // selectedItemPosition can still report the OLD/stale
+                    // position (usually 0). That caused the Bike Average
+                    // field to always load the wrong employee's value on
+                    // screen open. Instead, load using the employeeId we
+                    // already know we just selected.
+                    if (employeeIds.isNotEmpty()) {
+                        val targetId = if (sharedIndex >= 0) employeeIds[sharedIndex] else employeeIds[0]
+                        loadBikeAverageForEmployee(targetId)
                     }
                 }
 
@@ -155,8 +191,10 @@ class FuelSettingsActivity : AppCompatActivity() {
     private fun loadBikeAverageForSelectedEmployee() {
         val index = fuelEmployeeSpinner.selectedItemPosition
         if (index !in employeeIds.indices) return
-        val employeeId = employeeIds[index]
+        loadBikeAverageForEmployee(employeeIds[index])
+    }
 
+    private fun loadBikeAverageForEmployee(employeeId: String) {
         FirebaseDatabase.getInstance()
             .getReference("employees")
             .child(employeeId)

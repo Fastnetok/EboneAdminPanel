@@ -9,46 +9,47 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Ebone Admin Login"
-        android:textSize="22sp"
+        android:text="Set a Quick-Unlock PIN"
+        android:textSize="20sp"
         android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="4 to 6 digits — app ke dobara khulne par ye PIN ya fingerprint use hoga"
+        android:textSize="13sp"
         android:layout_marginBottom="24dp" />
 
     <EditText
-        android:id="@+id/emailInput"
+        android:id="@+id/pinInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Email"
-        android:inputType="textEmailAddress" />
+        android:hint="Naya PIN"
+        android:inputType="numberPassword"
+        android:maxLength="6" />
 
     <EditText
-        android:id="@+id/passwordInput"
+        android:id="@+id/pinConfirmInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Password"
-        android:inputType="textPassword"
+        android:hint="PIN dobara likhein"
+        android:inputType="numberPassword"
+        android:maxLength="6"
         android:layout_marginTop="12dp" />
 
     <Button
-        android:id="@+id/loginButton"
+        android:id="@+id/savePinButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Login"
+        android:text="Save PIN"
         android:layout_marginTop="16dp" />
 
     <TextView
-        android:id="@+id/statusText"
+        android:id="@+id/pinStatusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:textColor="#D32F2F" />
-
-    <TextView
-        android:id="@+id/forgotPasswordText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Password bhool gaye?"
-        android:textColor="#1565C0"
-        android:layout_marginTop="16dp" />
 
 </LinearLayout>

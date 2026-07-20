@@ -113,15 +113,26 @@
             android:exported="false" />
         <activity
             android:name=".MainActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/app_name"
-            android:theme="@style/Theme.EboneAdminPanel" >
+            android:theme="@style/Theme.EboneAdminPanel" />
+
+        <activity
+            android:name=".LoginActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".SetPinActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".UnlockActivity"
+            android:exported="false" />
         <activity
             android:name=".superadmin.dashboard.SuperDashboardActivity"
             android:exported="false"
