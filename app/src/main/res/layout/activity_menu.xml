@@ -81,7 +81,6 @@
             android:gravity="center_vertical"
             android:paddingStart="20dp"
             android:text="Logout"
-            android:textColor="#D32F2F"
             android:textSize="18sp"/>
 
     </LinearLayout>
