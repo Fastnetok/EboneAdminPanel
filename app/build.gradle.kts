@@ -10,6 +10,15 @@ android {
 
     compileSdk = 36
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
+            storePassword = System.getenv("STORE_PASSWORD") ?: ""
+            keyAlias = "ebone"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.eboneadminpanel"
         minSdk = 24
@@ -23,6 +32,8 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
+
             isMinifyEnabled = false
 
             proguardFiles(

@@ -79,9 +79,12 @@ class EmployeeComplaintAdapter(
                             )
                         )
                         .addOnSuccessListener {
-                            complaintList.removeAt(position)
-                            notifyItemRemoved(position)
-                            notifyItemRangeChanged(position, complaintList.size)
+                            // FIX: don't manually touch complaintList/position here.
+                            // The screen that shows this RecyclerView already has a
+                            // live Firebase listener on "complaints" that refreshes
+                            // the whole list (and calls notifyDataSetChanged) the
+                            // moment this write lands on the server. Doing both at
+                            // once caused a race condition -> IndexOutOfBounds crash.
                             Toast.makeText(
                                 holder.itemView.context,
                                 "Complaint Resolved",
@@ -177,9 +180,9 @@ class EmployeeComplaintAdapter(
                                     )
                                 )
                                 .addOnSuccessListener {
-                                    complaintList.removeAt(position)
-                                    notifyItemRemoved(position)
-                                    notifyItemRangeChanged(position, complaintList.size)
+                                    // FIX: same reason as above — let the live
+                                    // listener refresh the list instead of also
+                                    // removing here.
                                     Toast.makeText(
                                         holder.itemView.context,
                                         "Moved to $selectedName",
@@ -203,9 +206,7 @@ class EmployeeComplaintAdapter(
                         .child(complaint.complaintId)
                         .removeValue()
                         .addOnSuccessListener {
-                            complaintList.removeAt(position)
-                            notifyItemRemoved(position)
-                            notifyItemRangeChanged(position, complaintList.size)
+                            // FIX: same reason as above.
                             Toast.makeText(
                                 holder.itemView.context,
                                 "Complaint Deleted",

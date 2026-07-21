@@ -54,6 +54,8 @@ class MainActivity : AppCompatActivity(),
 
         setContentView(R.layout.activity_admin_dashboard)
 
+        VersionChecker.checkForUpdate(this)
+
         findViewById<TextView>(R.id.menuButton)
             .setOnClickListener {
 

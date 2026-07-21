@@ -1,17 +1,28 @@
-name: Android APK Build
+name: Build Release APK
 
 on:
   push:
     branches:
       - master
+
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
 
     runs-on: ubuntu-latest
 
+    env:
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEYSTORE_FILE: keystore.jks
+
     steps:
+
       - name: Checkout Source
         uses: actions/checkout@v4
 
@@ -21,14 +32,18 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Grant execute permission
+      - name: Restore Keystore
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > keystore.jks
+
+      - name: Grant Execute Permission
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
 
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EboneAdminPanel-Debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: EboneAdminPanel-Release
+          path: app/build/outputs/apk/release/app-release.apk
