@@ -1,28 +1,16 @@
-name: Build Release APK
+name: GitHub Release Build
 
 on:
   push:
     branches:
       - master
-
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
-    env:
-      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEYSTORE_FILE: keystore.jks
-
     steps:
-
       - name: Checkout Source
         uses: actions/checkout@v4
 
@@ -32,18 +20,22 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Restore Keystore
-        run: |
-          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > keystore.jks
-
-      - name: Grant Execute Permission
+      - name: Grant execute permission
         run: chmod +x gradlew
 
+      - name: Restore Signing Key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > app/keystore.jks
+
       - name: Build Release APK
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: ./gradlew assembleRelease
 
-      - name: Upload APK Artifact
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: EboneAdminPanel-Release
-          path: app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/*.apk
