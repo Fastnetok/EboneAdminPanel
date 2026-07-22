@@ -23,8 +23,8 @@ android {
         applicationId = "com.example.eboneadminpanel"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 18
+        versionName = "1.0.18"
 
         testInstrumentationRunner =
             "androidx.test.runner.AndroidJUnitRunner"
@@ -65,8 +65,6 @@ dependencies {
 
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
 
-    implementation("com.google.firebase:firebase-database")
-
     implementation("com.google.mlkit:text-recognition:16.0.1")
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
@@ -75,12 +73,7 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-
-    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
-
     implementation("com.google.firebase:firebase-database")
-
-    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     implementation("com.google.android.gms:play-services-maps:19.0.0")
 
