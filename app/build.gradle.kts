@@ -11,11 +11,22 @@ android {
     compileSdk = 36
 
     signingConfigs {
+
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "keystore.jks")
-            storePassword = System.getenv("STORE_PASSWORD") ?: ""
-            keyAlias = "ebone"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+
+            val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
+
+            storeFile = if (isGitHub) {
+                file("app/keystore.jks")
+            } else {
+                file("D:/AndroidKeys/EboneReleaseKey.jks")
+            }
+
+            storePassword = System.getenv("STORE_PASSWORD") ?: "aeiougabbas"
+
+            keyAlias = System.getenv("KEY_ALIAS") ?: "ebone"
+
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "aeiougabbas"
         }
     }
 
@@ -32,6 +43,11 @@ android {
     }
 
     buildTypes {
+
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
+
         release {
             signingConfig = signingConfigs.getByName("release")
 

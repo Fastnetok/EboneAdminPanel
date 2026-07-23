@@ -18,12 +18,16 @@ data class Complaint(
 
     var assignedTime: Long = 0,
 
+    var createdTime: Long = 0,
+
     var resolvedBy: String = "",
 
     var resolvedTime: Long = 0,
 
     var displayOrder: Long = 0,
 
-    var createdTime: Long = System.currentTimeMillis()
+    var seenByEmployee: Boolean = false,
+
+    var seenTime: Long = 0
 
 )
