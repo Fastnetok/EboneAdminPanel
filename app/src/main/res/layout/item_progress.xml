@@ -44,12 +44,49 @@
         android:text="Assigned: 14 Jun 2026 / 09:15 AM"
         android:textStyle="bold"/>
 
-    <TextView
-        android:id="@+id/runningTimeText"
+    <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Running: 2 Hours"
-        android:textColor="#FB8C00"
-        android:textStyle="bold"/>
+        android:layout_marginTop="4dp">
+
+        <TextView
+            android:id="@+id/runningTimeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Running : 2 Hours"
+            android:textColor="#FB8C00"
+            android:textStyle="bold"
+            android:textSize="15sp"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"/>
+
+        <!--
+            seenTimeText aur seenStatusIcon ab dynamic hain.
+            In ki Text/Icon/Visibility ProgressAdapter.kt se
+            complaint.seenByEmployee aur complaint.seenTime
+            ke mutabiq set hoti hai — koi hardcoded value nahi.
+        -->
+        <TextView
+            android:id="@+id/seenTimeText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="13sp"
+            android:textColor="#757575"
+            android:layout_toStartOf="@id/seenStatusIcon"
+            android:layout_marginEnd="4dp"
+            android:layout_centerVertical="true"
+            android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/seenStatusIcon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:src="@drawable/ic_single_tick"
+            android:visibility="visible" />
+
+    </RelativeLayout>
 
 </LinearLayout>

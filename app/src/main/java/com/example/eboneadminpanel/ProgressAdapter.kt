@@ -3,6 +3,7 @@ package com.example.eboneadminpanel
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import java.text.SimpleDateFormat
@@ -55,6 +56,18 @@ class ProgressAdapter(
                 TextView =
             itemView.findViewById(
                 R.id.runningTimeText
+            )
+
+        val seenTimeText:
+                TextView =
+            itemView.findViewById(
+                R.id.seenTimeText
+            )
+
+        val seenStatusIcon:
+                ImageView =
+            itemView.findViewById(
+                R.id.seenStatusIcon
             )
 
     }
@@ -154,6 +167,38 @@ class ProgressAdapter(
                             " Minute"
 
             }
+
+        // ---- Seen Status (Blue Double Tick) ----
+        if (complaint.seenByEmployee) {
+
+            holder.seenStatusIcon.setImageResource(
+                R.drawable.ic_double_tick
+            )
+
+            val seenFormatter =
+                SimpleDateFormat(
+                    "h:mm a",
+                    Locale.getDefault()
+                )
+
+            holder.seenTimeText.text =
+                seenFormatter.format(
+                    Date(complaint.seenTime)
+                )
+
+            holder.seenTimeText.visibility =
+                View.VISIBLE
+
+        } else {
+
+            holder.seenStatusIcon.setImageResource(
+                R.drawable.ic_single_tick
+            )
+
+            holder.seenTimeText.visibility =
+                View.GONE
+
+        }
 
     }
 
