@@ -16,8 +16,12 @@ android {
 
             val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
 
+            // FIXED: was file("app/keystore.jks") which resolved to
+            // app/app/keystore.jks (this file already lives inside app/
+            // module). Workflow creates the keystore at app/keystore.jks
+            // (relative to repo root), so paths must match exactly.
             storeFile = if (isGitHub) {
-                file("app/keystore.jks")
+                file("keystore.jks")
             } else {
                 file("D:/AndroidKeys/EboneReleaseKey.jks")
             }
