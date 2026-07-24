@@ -26,6 +26,14 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
+      - name: Extract version from gradle
+        run: |
+          VERSION_NAME=$(grep versionName app/build.gradle | head -1 | awk -F '"' '{print $2}')
+          VERSION_CODE=$(grep versionCode app/build.gradle | head -1 | awk '{print $2}')
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "Building version: $VERSION_NAME (code $VERSION_CODE)"
+
       - name: Restore Signing Key
         run: |
           echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > app/keystore.jks
@@ -46,8 +54,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: Version ${{ github.run_number }}
+          tag_name: v${{ env.VERSION_NAME }}
+          name: Version ${{ env.VERSION_NAME }}
           files: app/build/outputs/apk/release/*.apk
           generate_release_notes: true
         env:
