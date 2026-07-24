@@ -25,24 +25,25 @@ object VersionChecker {
 
         android.util.Log.d("TEST_UPDATE", "checkForUpdate Called")
 
-        val currentVersionCode = try {
+        // FIXED: was comparing integer versionCode against a dotted tag
+        // (e.g. "1.0.21"), which silently failed toIntOrNull() and
+        // aborted the whole check. Now we compare the installed
+        // versionName ("1.0.18") against the GitHub tag's versionName
+        // ("1.0.21") using proper semantic version comparison.
+        val currentVersionName = try {
             context.packageManager
                 .getPackageInfo(context.packageName, 0)
-                .let {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P)
-                        it.longVersionCode.toInt()
-                    else
-                        @Suppress("DEPRECATION") it.versionCode
-                }
+                .versionName ?: return
         } catch (e: Exception) {
             return
         }
 
-        checkGitHubRelease(context, currentVersionCode)
+        checkGitHubRelease(context, currentVersionName)
     }
+
     private fun checkGitHubRelease(
         context: Context,
-        currentVersionCode: Int
+        currentVersionName: String
     ) {
 
         android.util.Log.d("GitHubUpdate", "checkGitHubRelease Started")
@@ -81,14 +82,13 @@ object VersionChecker {
                 android.util.Log.d("GitHubUpdate", "APK = $downloadUrl")
                 android.util.Log.d("GitHubUpdate", "Notes = $releaseNotes")
 
-                val latestVersionCode = tagName
-                    .replace("v", "", ignoreCase = true)
-                    .toIntOrNull() ?: return@thread
+                // Strip the leading "v" -> "1.0.21"
+                val latestVersionName = tagName.replace("v", "", ignoreCase = true)
 
-                android.util.Log.d("GitHubUpdate", "Installed = $currentVersionCode")
-                android.util.Log.d("GitHubUpdate", "Latest = $latestVersionCode")
+                android.util.Log.d("GitHubUpdate", "Installed = $currentVersionName")
+                android.util.Log.d("GitHubUpdate", "Latest = $latestVersionName")
 
-                if (latestVersionCode > currentVersionCode) {
+                if (isNewerVersion(latestVersionName, currentVersionName)) {
 
                     (context as android.app.Activity).runOnUiThread {
 
@@ -112,6 +112,24 @@ object VersionChecker {
         }
 
     }
+
+    // Compares two dotted version strings like "1.0.21" vs "1.0.18"
+    // part by part as numbers, so "1.0.9" < "1.0.10" correctly
+    // (plain string comparison would get that wrong).
+    private fun isNewerVersion(latest: String, current: String): Boolean {
+        val latestParts = latest.split(".").map { it.toIntOrNull() ?: 0 }
+        val currentParts = current.split(".").map { it.toIntOrNull() ?: 0 }
+
+        val maxLength = maxOf(latestParts.size, currentParts.size)
+
+        for (i in 0 until maxLength) {
+            val l = latestParts.getOrElse(i) { 0 }
+            val c = currentParts.getOrElse(i) { 0 }
+            if (l != c) return l > c
+        }
+        return false
+    }
+
     private fun showUpdateDialog(
         context: Context,
         versionName: String,
