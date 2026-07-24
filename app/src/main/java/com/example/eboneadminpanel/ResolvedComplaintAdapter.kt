@@ -126,9 +126,13 @@ class ResolvedComplaintAdapter(
                         .child(complaint.complaintId)
                         .removeValue()
                         .addOnSuccessListener {
-                            complaintList.removeAt(position)
-                            notifyItemRemoved(position)
-                            notifyItemRangeChanged(position, complaintList.size)
+                            // FIX: removed complaintList.removeAt(position) / notifyItemRemoved.
+                            // The screen holding this RecyclerView already has a live
+                            // Firebase listener on "complaints" that refreshes the whole
+                            // list (and calls notifyDataSetChanged) the moment this delete
+                            // lands on the server. Also mutating the list here with the
+                            // old captured "position" caused a race condition -> crash
+                            // (IndexOutOfBoundsException) when the two updates overlapped.
                             Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
                         }
                         .addOnFailureListener {
@@ -180,9 +184,9 @@ class ResolvedComplaintAdapter(
                                     )
                                 )
                                 .addOnSuccessListener {
-                                    complaintList.removeAt(position)
-                                    notifyItemRemoved(position)
-                                    notifyItemRangeChanged(position, complaintList.size)
+                                    // FIX: same reason as delete above — let the live
+                                    // Firebase listener refresh the list instead of
+                                    // also mutating complaintList/position here.
                                     Toast.makeText(
                                         context,
                                         "Moved to $selectedName",
