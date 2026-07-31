@@ -17,6 +17,8 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import org.json.JSONObject
 
 class WebViewLoginActivity : AppCompatActivity() {
@@ -138,13 +140,26 @@ class WebViewLoginActivity : AppCompatActivity() {
         loadInitialPage()
     }
 
+    private fun securePrefs(name: String): android.content.SharedPreferences {
+        val masterKey = MasterKey.Builder(this)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            this,
+            name,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
     private fun getPrefsName(): String {
         return if (selectedIsp == "WATEEN") WATEEN_PREFS else PREFS_NAME
     }
 
     private fun loadInitialPage() {
         val accounts = loadAccounts()
-        val active = getSharedPreferences(getPrefsName(), MODE_PRIVATE)
+        val active = securePrefs(getPrefsName())
             .getString(KEY_ACTIVE, "") ?: ""
 
         if (active.isNotEmpty() && accounts.has(active)) {
@@ -175,20 +190,20 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun loadAccounts(): JSONObject {
-        val raw = getSharedPreferences(getPrefsName(), MODE_PRIVATE)
+        val raw = securePrefs(getPrefsName())
             .getString(KEY_ACCOUNTS, "") ?: ""
         return if (raw.isEmpty()) JSONObject() else JSONObject(raw)
     }
 
     private fun saveAccounts(accounts: JSONObject) {
-        getSharedPreferences(getPrefsName(), MODE_PRIVATE)
+        securePrefs(getPrefsName())
             .edit()
             .putString(KEY_ACCOUNTS, accounts.toString())
             .apply()
     }
 
     private fun setActiveAccount(name: String) {
-        getSharedPreferences(getPrefsName(), MODE_PRIVATE)
+        securePrefs(getPrefsName())
             .edit()
             .putString(KEY_ACTIVE, name)
             .apply()
