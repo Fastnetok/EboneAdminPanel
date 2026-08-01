@@ -28,10 +28,14 @@ class WebViewLoginActivity : AppCompatActivity() {
     private var activeAccountName = ""
     private var selectedIsp = "EBONE"
 
+    private var autoActivateCustomerId: String? = null
+    private var eboneSubmitClicked = false
+
     private val PREFS_NAME = "ebill_accounts"
     private val KEY_ACCOUNTS = "accounts_json"
     private val KEY_ACTIVE = "active_account"
     private val WATEEN_PREFS = "wateen_accounts"
+    private val ZONG_PREFS = "zong_accounts"
 
     override fun onResume() {
         super.onResume()
@@ -90,6 +94,7 @@ class WebViewLoginActivity : AppCompatActivity() {
         window.decorView.systemUiVisibility = 0
 
         selectedIsp = intent.getStringExtra("selected_isp") ?: "EBONE"
+        autoActivateCustomerId = intent.getStringExtra("auto_activate_customer_id")
 
         webView = findViewById(R.id.loginWebView)
 
@@ -120,6 +125,12 @@ class WebViewLoginActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (url == null) return
                 CookieManager.getInstance().flush()
+                if (selectedIsp == "ZONG") {
+                    webView.evaluateJavascript(
+                        "document.querySelectorAll('a[target=\"_blank\"]').forEach(function(a){a.removeAttribute('target');});",
+                        null
+                    )
+                }
                 handlePageLoaded(url)
             }
 
@@ -128,10 +139,18 @@ class WebViewLoginActivity : AppCompatActivity() {
                 request: android.webkit.WebResourceRequest?
             ): Boolean {
                 val url = request?.url?.toString() ?: return false
-                if (selectedIsp == "EBONE" && url.contains("/clients/client/")) {
+                if (selectedIsp == "EBONE" && url.contains("/clients/client/") && autoActivateCustomerId == null) {
                     webView.postDelayed({ fetchEboneCustomerDetails() }, 1500)
+                } else if (selectedIsp == "EBONE" && url.contains("/clients/clientStats/")) {
+                    webView.postDelayed({ clickEboneSubmitButton() }, 1500)
                 } else if (selectedIsp == "WATEEN" && url.contains("/user/user/view/")) {
-                    webView.postDelayed({ fetchWateenCustomerDetails() }, 1500)
+                    if (autoActivateCustomerId != null) {
+                        webView.postDelayed({ onWateenProfileOpened() }, 1500)
+                    } else {
+                        webView.postDelayed({ fetchWateenCustomerDetails() }, 1500)
+                    }
+                } else if (selectedIsp == "ZONG" && url.contains("customer_portal.php")) {
+                    webView.postDelayed({ onZongProfileOpened() }, 1500)
                 }
                 return false
             }
@@ -154,7 +173,29 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun getPrefsName(): String {
-        return if (selectedIsp == "WATEEN") WATEEN_PREFS else PREFS_NAME
+        return when (selectedIsp) {
+            "WATEEN" -> WATEEN_PREFS
+            "ZONG" -> ZONG_PREFS
+            else -> PREFS_NAME
+        }
+    }
+
+    private fun domainFor(isp: String): String = when (isp) {
+        "WATEEN" -> "https://panel.wateen.com"
+        "ZONG" -> "https://turbonet.zong.com.pk"
+        else -> "https://partner.ebill.pk"
+    }
+
+    private fun loginUrlFor(isp: String): String = when (isp) {
+        "WATEEN" -> "https://panel.wateen.com/auth.html"
+        "ZONG" -> "https://turbonet.zong.com.pk/login.php"
+        else -> "https://partner.ebill.pk/logincheck"
+    }
+
+    private fun clientsUrlFor(isp: String): String = when (isp) {
+        "WATEEN" -> "https://panel.wateen.com/user/user/all"
+        "ZONG" -> "https://turbonet.zong.com.pk/customers.php"
+        else -> "https://partner.ebill.pk/clients"
     }
 
     private fun loadInitialPage() {
@@ -167,25 +208,13 @@ class WebViewLoginActivity : AppCompatActivity() {
             val acc = accounts.getJSONObject(active)
             val cookie = acc.optString("cookie", "")
             if (cookie.isNotEmpty()) {
-                val domain = if (selectedIsp == "WATEEN")
-                    "https://panel.wateen.com"
-                else
-                    "https://partner.ebill.pk"
-                CookieManager.getInstance().setCookie(domain, cookie)
+                CookieManager.getInstance().setCookie(domainFor(selectedIsp), cookie)
                 CookieManager.getInstance().flush()
             }
             loginDone = true
-            val clientsUrl = if (selectedIsp == "WATEEN")
-                "https://panel.wateen.com/user/user/all"
-            else
-                "https://partner.ebill.pk/clients"
-            webView.loadUrl(clientsUrl)
+            webView.loadUrl(clientsUrlFor(selectedIsp))
         } else {
-            val loginUrl = if (selectedIsp == "WATEEN")
-                "https://panel.wateen.com/auth.html"
-            else
-                "https://partner.ebill.pk/logincheck"
-            webView.loadUrl(loginUrl)
+            webView.loadUrl(loginUrlFor(selectedIsp))
         }
     }
 
@@ -220,7 +249,11 @@ class WebViewLoginActivity : AppCompatActivity() {
         val listView = dialogView.findViewById<android.widget.ListView>(R.id.accountListView)
         val addButton = dialogView.findViewById<Button>(R.id.addAccountButton)
 
-        val title = if (selectedIsp == "WATEEN") "Wateen Accounts" else "Ebone Accounts"
+        val title = when (selectedIsp) {
+            "WATEEN" -> "Wateen Accounts"
+            "ZONG" -> "Zong Accounts"
+            else -> "Ebone Accounts"
+        }
 
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle(title)
@@ -282,12 +315,18 @@ class WebViewLoginActivity : AppCompatActivity() {
         nameInput.hint = "Account name (e.g. Akmal)"
         layout.addView(nameInput)
 
+        val ispLabel = when (selectedIsp) {
+            "WATEEN" -> "Wateen"
+            "ZONG" -> "Zong"
+            else -> "ebill.pk"
+        }
+
         val userInput = EditText(this)
-        userInput.hint = if (selectedIsp == "WATEEN") "Wateen username" else "ebill.pk username"
+        userInput.hint = "$ispLabel username"
         layout.addView(userInput)
 
         val passInput = EditText(this)
-        passInput.hint = if (selectedIsp == "WATEEN") "Wateen password" else "ebill.pk password"
+        passInput.hint = "$ispLabel password"
         passInput.inputType = android.text.InputType.TYPE_CLASS_TEXT or
                 android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         layout.addView(passInput)
@@ -320,11 +359,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 CookieManager.getInstance().flush()
                 loginDone = false
 
-                val loginUrl = if (selectedIsp == "WATEEN")
-                    "https://panel.wateen.com/auth.html"
-                else
-                    "https://partner.ebill.pk/logincheck"
-                webView.loadUrl(loginUrl)
+                webView.loadUrl(loginUrlFor(selectedIsp))
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -342,25 +377,13 @@ class WebViewLoginActivity : AppCompatActivity() {
         setActiveAccount(name)
 
         if (cookie.isNotEmpty()) {
-            val domain = if (selectedIsp == "WATEEN")
-                "https://panel.wateen.com"
-            else
-                "https://partner.ebill.pk"
-            CookieManager.getInstance().setCookie(domain, cookie)
+            CookieManager.getInstance().setCookie(domainFor(selectedIsp), cookie)
             CookieManager.getInstance().flush()
             loginDone = true
-            val clientsUrl = if (selectedIsp == "WATEEN")
-                "https://panel.wateen.com/user/user/all"
-            else
-                "https://partner.ebill.pk/clients"
-            webView.loadUrl(clientsUrl)
+            webView.loadUrl(clientsUrlFor(selectedIsp))
         } else {
             loginDone = false
-            val loginUrl = if (selectedIsp == "WATEEN")
-                "https://panel.wateen.com/auth.html"
-            else
-                "https://partner.ebill.pk/logincheck"
-            webView.loadUrl(loginUrl)
+            webView.loadUrl(loginUrlFor(selectedIsp))
         }
     }
 
@@ -377,9 +400,32 @@ class WebViewLoginActivity : AppCompatActivity() {
                 tryAutoLogin()
             }
 
-            selectedIsp == "EBONE" && url.contains("partner.ebill.pk") &&
-                    url.contains("/clients/client/") -> {
+            selectedIsp == "ZONG" && url.contains("login.php") -> {
+                loginDone = false
+                tryAutoLogin()
+            }
+
+            selectedIsp == "EBONE" && url.contains("/clients/clientStats/") -> {
+                clickEboneSubmitButton()
+            }
+
+            selectedIsp == "EBONE" && url.contains("/clients/client/") &&
+                    autoActivateCustomerId != null && eboneSubmitClicked -> {
+                fetchEboneExpiryAndFinish()
+            }
+
+            selectedIsp == "EBONE" && url.contains("/clients/client/") &&
+                    autoActivateCustomerId != null -> {
+                clickEboneActiveLink()
+            }
+
+            selectedIsp == "EBONE" && url.contains("/clients/client/") -> {
                 fetchEboneCustomerDetails()
+            }
+
+            selectedIsp == "WATEEN" && url.contains("panel.wateen.com") &&
+                    url.contains("/user/user/view/") && autoActivateCustomerId != null -> {
+                onWateenProfileOpened()
             }
 
             selectedIsp == "WATEEN" && url.contains("panel.wateen.com") &&
@@ -387,8 +433,13 @@ class WebViewLoginActivity : AppCompatActivity() {
                 fetchWateenCustomerDetails()
             }
 
+            selectedIsp == "ZONG" && url.contains("customer_portal.php") -> {
+                onZongProfileOpened()
+            }
+
             selectedIsp == "EBONE" && url.contains("partner.ebill.pk") &&
-                    !url.contains("/clients/client/") -> {
+                    !url.contains("/clients/client/") &&
+                    !url.contains("/clients/clientStats/") -> {
                 loginDone = true
                 saveCookieForCurrentAccount("https://partner.ebill.pk")
                 webView.evaluateJavascript(
@@ -399,7 +450,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 if (!url.contains("/clients")) {
                     webView.postDelayed({
                         webView.loadUrl("https://partner.ebill.pk/clients")
-                    }, 800)
+                    }, 50)
                 }
             }
 
@@ -412,6 +463,26 @@ class WebViewLoginActivity : AppCompatActivity() {
                     webView.postDelayed({
                         webView.loadUrl("https://panel.wateen.com/user/user/all")
                     }, 800)
+                } else {
+                    autoActivateCustomerId?.let { id ->
+                        webView.postDelayed({ searchWateenCustomer(id) }, 800)
+                    }
+                }
+            }
+
+            selectedIsp == "ZONG" && url.contains("turbonet.zong.com.pk") &&
+                    !url.contains("login.php") &&
+                    !url.contains("customer_portal.php") -> {
+                loginDone = true
+                saveCookieForCurrentAccount("https://turbonet.zong.com.pk")
+                if (!url.contains("customers.php")) {
+                    webView.postDelayed({
+                        webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
+                    }, 800)
+                } else {
+                    autoActivateCustomerId?.let { id ->
+                        webView.postDelayed({ searchZongCustomer(id) }, 800)
+                    }
                 }
             }
         }
@@ -456,6 +527,266 @@ class WebViewLoginActivity : AppCompatActivity() {
                         "})()", null
             )
         }, 1200)
+    }
+
+    // ===================== WATEEN: SEARCH & ACTIVATION =====================
+
+    private fun searchWateenCustomer(customerId: String) {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var inp = document.querySelector('.dataTables_filter input');" +
+                    "  if(inp){" +
+                    "    inp.focus();" +
+                    "    inp.value = '" + customerId + "';" +
+                    "    inp.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "    inp.dispatchEvent(new Event('keyup',{bubbles:true}));" +
+                    "  }" +
+                    "})()", null
+        )
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var link = document.querySelector('#userListAll tbody tr td a');" +
+                        "  if(link){ link.click(); return 'clicked'; }" +
+                        "  return 'not found';" +
+                        "})()", null
+            )
+        }, 1200)
+    }
+
+    private fun onWateenProfileOpened() {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var spans = document.querySelectorAll('span.btn-warning');" +
+                    "  for (var i=0;i<spans.length;i++){" +
+                    "    if (spans[i].innerText.indexOf('Renew') > -1){ spans[i].click(); return 'opened'; }" +
+                    "  }" +
+                    "  return 'not found';" +
+                    "})()", null
+        )
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var buttons = document.querySelectorAll('button[type=submit]');" +
+                        "  for (var i=0;i<buttons.length;i++){" +
+                        "    if (buttons[i].innerText.indexOf('Active User') > -1){ buttons[i].click(); return 'activated'; }" +
+                        "  }" +
+                        "  return 'not found';" +
+                        "})()", null
+            )
+        }, 1500)
+        webView.postDelayed({ fetchWateenExpiryAndFinish() }, 3500)
+    }
+
+    private fun fetchWateenExpiryAndFinish() {
+        val script = """
+            (function(){
+                var expiry = '';
+                var el = document.querySelector('abbr[title="Expiry Date/Time"] strong');
+                if (el) {
+                    expiry = (el.textContent || '').trim();
+                }
+                return JSON.stringify({expiry:expiry});
+            })()
+        """.trimIndent()
+
+        webView.evaluateJavascript(script) { result ->
+            try {
+                val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
+                val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+
+                val resultIntent = Intent()
+                resultIntent.putExtra("activation_success", true)
+                resultIntent.putExtra("new_expiry_date", expiry)
+                setResult(RESULT_OK, resultIntent)
+            } catch (e: Exception) {
+                val resultIntent = Intent()
+                resultIntent.putExtra("activation_success", true)
+                setResult(RESULT_OK, resultIntent)
+            } finally {
+                finish()
+            }
+        }
+    }
+
+    // ===================== EBONE: ACTIVATION =====================
+
+    private fun clickEboneActiveLink() {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var link = document.querySelector('a[href*=\"/clientStats/\"]');" +
+                    "  if(link){ link.click(); return 'clicked'; }" +
+                    "  return 'not found';" +
+                    "})()", null
+        )
+    }
+
+    private fun clickEboneSubmitButton() {
+        eboneSubmitClicked = true
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var btn = document.querySelector('button[type=submit].btn-default');" +
+                        "  if(!btn){" +
+                        "    var all = document.querySelectorAll('button[type=submit]');" +
+                        "    for (var i=0;i<all.length;i++){ if(all[i].innerText.indexOf('Submit') > -1){ btn = all[i]; break; } }" +
+                        "  }" +
+                        "  if(btn){ btn.click(); return 'submitted'; }" +
+                        "  return 'not found';" +
+                        "})()", null
+            )
+        }, 800)
+    }
+
+    private fun fetchEboneExpiryAndFinish() {
+        val script = """
+            (function(){
+                var expiry = '';
+                var rows = document.querySelectorAll('table.table-hover tbody tr');
+                for (var i=0; i<rows.length; i++){
+                    var th = rows[i].querySelector('th');
+                    if (th && th.innerText.indexOf('Expiry') > -1){
+                        var cells = rows[i].querySelectorAll('td');
+                        if (cells.length > 0){
+                            expiry = (cells[cells.length - 1].textContent || '').trim();
+                        }
+                        break;
+                    }
+                }
+                return JSON.stringify({expiry:expiry});
+            })()
+        """.trimIndent()
+
+        webView.evaluateJavascript(script) { result ->
+            try {
+                val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
+                val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+
+                val resultIntent = Intent()
+                resultIntent.putExtra("activation_success", expiry.isNotEmpty())
+                resultIntent.putExtra("new_expiry_date", expiry)
+                setResult(RESULT_OK, resultIntent)
+            } catch (e: Exception) {
+                val resultIntent = Intent()
+                resultIntent.putExtra("activation_success", false)
+                setResult(RESULT_OK, resultIntent)
+            } finally {
+                finish()
+            }
+        }
+    }
+
+    // ===================== ZONG: SEARCH =====================
+
+    private fun searchZongCustomer(customerId: String) {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var inp = document.querySelector('.dataTables_filter input');" +
+                    "  if(inp){" +
+                    "    inp.focus();" +
+                    "    inp.value = '" + customerId + "';" +
+                    "    inp.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "    inp.dispatchEvent(new Event('keyup',{bubbles:true}));" +
+                    "  }" +
+                    "})()", null
+        )
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var link = document.querySelector('table tbody tr td a');" +
+                        "  if(link){ link.removeAttribute('target'); link.click(); return 'clicked'; }" +
+                        "  return 'not found';" +
+                        "})()", null
+            )
+        }, 1200)
+    }
+
+    // ===================== ZONG: PROFILE OPENED =====================
+
+    private fun onZongProfileOpened() {
+        if (autoActivateCustomerId != null) {
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var btn = document.querySelector('[data-target^=\"#recharge\"]');" +
+                        "  if(btn){ btn.click(); return 'opened'; }" +
+                        "  return 'not found';" +
+                        "})()", null
+            )
+            webView.postDelayed({
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var btn = document.querySelector('#saferecharge');" +
+                            "  if(btn){ btn.click(); return 'confirmed'; }" +
+                            "  return 'not found';" +
+                            "})()", null
+                )
+            }, 1500)
+            webView.postDelayed({ fetchZongExpiryAndFinish() }, 4000)
+        } else {
+            fetchZongCustomerDetails()
+        }
+    }
+
+    private fun fetchZongExpiryAndFinish() {
+        val script = """
+            (function(){
+                var expiry = '';
+                var tiles = document.querySelectorAll('.col-md-4');
+                for (var i=0; i<tiles.length; i++){
+                    var title = tiles[i].querySelector('.title');
+                    if (title && title.innerText.indexOf('Expiration') > -1){
+                        var val = tiles[i].querySelector('.counter');
+                        if (val) expiry = (val.textContent || '').trim();
+                        break;
+                    }
+                }
+                return JSON.stringify({expiry:expiry});
+            })()
+        """.trimIndent()
+
+        webView.evaluateJavascript(script) { result ->
+            try {
+                val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
+                val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+
+                val resultIntent = Intent()
+                resultIntent.putExtra("activation_success", expiry.isNotEmpty())
+                resultIntent.putExtra("new_expiry_date", expiry)
+                setResult(RESULT_OK, resultIntent)
+            } catch (e: Exception) {
+                val resultIntent = Intent()
+                resultIntent.putExtra("activation_success", false)
+                setResult(RESULT_OK, resultIntent)
+            } finally {
+                finish()
+            }
+        }
+    }
+
+    private fun fetchZongCustomerDetails() {
+        val script = """
+            (function(){
+                var userId = '';
+                var address = '';
+                var phone = '';
+                var expiry = '';
+
+                var tiles = document.querySelectorAll('.col-md-4');
+                for (var i=0; i<tiles.length; i++){
+                    var title = tiles[i].querySelector('.title');
+                    if (title && title.innerText.indexOf('Expiration') > -1){
+                        var val = tiles[i].querySelector('.counter');
+                        if (val) expiry = (val.textContent || '').trim();
+                    }
+                }
+
+                return JSON.stringify({userId:userId, address:address, phone:phone, expiry:expiry});
+            })()
+        """.trimIndent()
+
+        webView.evaluateJavascript(script) { result ->
+            handleFetchResult(result)
+        }
     }
 
     private fun fetchEboneCustomerDetails() {

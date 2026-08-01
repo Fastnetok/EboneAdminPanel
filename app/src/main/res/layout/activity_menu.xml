@@ -75,6 +75,24 @@
             android:textSize="18sp"/>
 
         <TextView
+            android:id="@+id/menuCustomerBilling"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Customer Billing"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuAddCustomer"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Add Customer"
+            android:textSize="18sp"/>
+
+        <TextView
             android:id="@+id/menuLogout"
             android:layout_width="match_parent"
             android:layout_height="55dp"

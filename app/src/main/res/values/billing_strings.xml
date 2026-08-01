@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="title_customer_billing">Customer Billing</string>
+    <string name="label_packages_today">Packages Activated</string>
+    <string name="label_earnings_today">Earnings Today</string>
+    <string name="label_verified_payments">Verified Payments</string>
+    <string name="label_failed_entries">Failed / Fake Entries</string>
+    <string name="title_packages_by_speed">Packages by Speed</string>
+    <string name="title_network_breakdown">Activations by Network</string>
+    <string name="label_total_accounts">Total Accounts</string>
+    <string name="label_active_accounts">Active Accounts</string>
+    <string name="label_disabled_accounts">Disabled Accounts</string>
+    <string name="title_recent_transactions">Recent Transactions</string>
+    <string name="action_view_all">View All</string>
+    <string name="status_verified">Verified</string>
+    <string name="status_mismatch">TID Mismatch</string>
+</resources>

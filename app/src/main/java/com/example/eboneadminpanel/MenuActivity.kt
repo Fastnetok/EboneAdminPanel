@@ -33,6 +33,14 @@ class MenuActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.menuSettings)
 
         // NEW
+        val customerBilling =
+            findViewById<TextView>(R.id.menuCustomerBilling)
+
+        // NEW
+        val addCustomer =
+            findViewById<TextView>(R.id.menuAddCustomer)
+
+        // NEW
         val logout =
             findViewById<TextView>(R.id.menuLogout)
 
@@ -58,6 +66,16 @@ class MenuActivity : AppCompatActivity() {
 
         settings.setOnClickListener {
             startActivity(Intent(this, ManagementToolsActivity::class.java))
+        }
+
+        // NEW: Customer Billing dashboard
+        customerBilling.setOnClickListener {
+            startActivity(Intent(this, CustomerBillingActivity::class.java))
+        }
+
+// NEW: Add Customer form
+        addCustomer.setOnClickListener {
+            startActivity(Intent(this, AddCustomerActivity::class.java))
         }
 
         // NEW: Logout — asks for confirmation, then signs out of Firebase,

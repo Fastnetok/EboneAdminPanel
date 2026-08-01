@@ -54,6 +54,8 @@ class MainActivity : AppCompatActivity(),
 
         setContentView(R.layout.activity_admin_dashboard)
 
+        androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, PaymentActivationService::class.java))
+
         VersionChecker.checkForUpdate(this)
 
         findViewById<TextView>(R.id.menuButton)
