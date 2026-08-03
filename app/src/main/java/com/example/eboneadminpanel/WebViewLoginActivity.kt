@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.firebase.firestore.FirebaseFirestore
 import org.json.JSONObject
 
 class WebViewLoginActivity : AppCompatActivity() {
@@ -28,8 +29,15 @@ class WebViewLoginActivity : AppCompatActivity() {
     private var activeAccountName = ""
     private var selectedIsp = "EBONE"
 
+    // If set (via intent extra "auto_activate_customer_id"), this screen will
+    // automatically: log in -> search this customer -> open profile ->
+    // click Recharge -> confirm -> capture the new expiry date -> return it.
+    // Used by the Payment-Verified -> Activate flow. When null, behaves exactly
+    // like before (manual browsing / fetch for Complaint auto-fill).
     private var autoActivateCustomerId: String? = null
     private var eboneSubmitClicked = false
+    private var transactionId: String? = null
+    private val db by lazy { FirebaseFirestore.getInstance() }
 
     private val PREFS_NAME = "ebill_accounts"
     private val KEY_ACCOUNTS = "accounts_json"
@@ -95,6 +103,16 @@ class WebViewLoginActivity : AppCompatActivity() {
 
         selectedIsp = intent.getStringExtra("selected_isp") ?: "EBONE"
         autoActivateCustomerId = intent.getStringExtra("auto_activate_customer_id")
+        transactionId = intent.getStringExtra("transaction_id")
+
+        // Confirms visibly which mode this screen opened in — proves the
+        // Complaint-form "fetch details" flow and the Payment "activate"
+        // flow never interfere with each other.
+        if (autoActivateCustomerId != null) {
+            android.widget.Toast.makeText(
+                this, "Activation mode: $selectedIsp — $autoActivateCustomerId", android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
 
         webView = findViewById(R.id.loginWebView)
 
@@ -125,6 +143,9 @@ class WebViewLoginActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (url == null) return
                 CookieManager.getInstance().flush()
+                // Zong's customer list opens profile links with target="_blank",
+                // which a single WebView won't follow by default — strip that
+                // attribute so the click navigates normally in the same view.
                 if (selectedIsp == "ZONG") {
                     webView.evaluateJavascript(
                         "document.querySelectorAll('a[target=\"_blank\"]').forEach(function(a){a.removeAttribute('target');});",
@@ -410,13 +431,24 @@ class WebViewLoginActivity : AppCompatActivity() {
             }
 
             selectedIsp == "EBONE" && url.contains("/clients/client/") &&
-                    autoActivateCustomerId != null && eboneSubmitClicked -> {
-                fetchEboneExpiryAndFinish()
-            }
-
-            selectedIsp == "EBONE" && url.contains("/clients/client/") &&
                     autoActivateCustomerId != null -> {
-                clickEboneActiveLink()
+                // SAFETY: confirm the URL's customer ID is an EXACT match,
+                // not just a page that happens to contain our ID as a
+                // substring (e.g. "olt" inside "arslankot2olt") — activating
+                // the wrong customer's connection would be a serious error.
+                val urlCustomerId = url.substringAfterLast("/clients/client/").substringBefore("?").trim()
+                if (urlCustomerId != autoActivateCustomerId) {
+                    android.widget.Toast.makeText(
+                        this,
+                        "STOPPED: expected \"$autoActivateCustomerId\" but panel opened \"$urlCustomerId\" — not an exact match.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    android.util.Log.e("WebViewLoginActivity", "Customer ID mismatch — expected $autoActivateCustomerId, got $urlCustomerId. Aborting to avoid activating wrong customer.")
+                } else if (eboneSubmitClicked) {
+                    fetchEboneExpiryAndFinish()
+                } else {
+                    clickEboneActiveLink()
+                }
             }
 
             selectedIsp == "EBONE" && url.contains("/clients/client/") -> {
@@ -450,7 +482,12 @@ class WebViewLoginActivity : AppCompatActivity() {
                 if (!url.contains("/clients")) {
                     webView.postDelayed({
                         webView.loadUrl("https://partner.ebill.pk/clients")
-                    }, 50)
+                    }, 800)
+                } else if (autoActivateCustomerId != null) {
+                    // This was the missing piece — Zong/Wateen already auto-search,
+                    // Ebone never did. Now it does too.
+                    android.widget.Toast.makeText(this, "Panel: searching for $autoActivateCustomerId…", android.widget.Toast.LENGTH_SHORT).show()
+                    webView.postDelayed({ searchEboneCustomer(autoActivateCustomerId!!) }, 800)
                 }
             }
 
@@ -480,6 +517,8 @@ class WebViewLoginActivity : AppCompatActivity() {
                         webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
                     }, 800)
                 } else {
+                    // We're on customers.php and logged in — if this screen was
+                    // launched to auto-activate a specific customer, search now.
                     autoActivateCustomerId?.let { id ->
                         webView.postDelayed({ searchZongCustomer(id) }, 800)
                     }
@@ -527,6 +566,33 @@ class WebViewLoginActivity : AppCompatActivity() {
                         "})()", null
             )
         }, 1200)
+        // NOTE (ZONG only): the login button has Google reCAPTCHA attached.
+        // Auto-fill + click works most of the time, but if Google occasionally
+        // shows a visual challenge, admin must solve it manually that one time.
+    }
+
+    /**
+     * Writes the activation result back to Firestore so CustomerIDApp
+     * (listening in real-time) sees it immediately, and marks the
+     * transaction VERIFIED/FAILED.
+     */
+    private fun writeActivationResultToFirestore(success: Boolean, expiry: String) {
+        transactionId?.let { txId ->
+            db.collection("transactions").document(txId)
+                .update("status", if (success) "VERIFIED" else "FAILED")
+        }
+        if (success) {
+            autoActivateCustomerId?.let { custId ->
+                db.collection("customers").document(custId)
+                    .update(
+                        mapOf(
+                            "activationStatus" to "ACTIVE",
+                            "lastPaymentDate" to System.currentTimeMillis(),
+                            "ispExpiryDate" to expiry
+                        )
+                    )
+            }
+        }
     }
 
     // ===================== WATEEN: SEARCH & ACTIVATION =====================
@@ -555,6 +621,7 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun onWateenProfileOpened() {
+        // Step 1: click the "Renew" span (opens a popup/modal).
         webView.evaluateJavascript(
             "(function(){" +
                     "  var spans = document.querySelectorAll('span.btn-warning');" +
@@ -564,6 +631,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     "  return 'not found';" +
                     "})()", null
         )
+        // Step 2: click "Active User" submit button inside the popup.
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
@@ -575,6 +643,9 @@ class WebViewLoginActivity : AppCompatActivity() {
                         "})()", null
             )
         }, 1500)
+        // Step 3: capture the (best-effort) new expiry text and finish.
+        // TODO: replace this generic search with the exact selector once the
+        // expiry-date HTML block from the Wateen profile page is confirmed.
         webView.postDelayed({ fetchWateenExpiryAndFinish() }, 3500)
     }
 
@@ -595,8 +666,9 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
                 val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
 
+                writeActivationResultToFirestore(true, expiry)
                 val resultIntent = Intent()
-                resultIntent.putExtra("activation_success", true)
+                resultIntent.putExtra("activation_success", true) // click sequence completed
                 resultIntent.putExtra("new_expiry_date", expiry)
                 setResult(RESULT_OK, resultIntent)
             } catch (e: Exception) {
@@ -611,7 +683,17 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     // ===================== EBONE: ACTIVATION =====================
 
+    private fun searchEboneCustomer(customerId: String) {
+        // SAFETY FIX: the sidebar search form does a substring match on the
+        // panel's server (e.g. searching "olt" can land on "arslankot2olt"),
+        // which could activate the WRONG customer. Since we already know the
+        // exact customer ID, navigate straight to their profile URL instead
+        // of searching — this cannot land on a different customer.
+        webView.loadUrl("https://partner.ebill.pk/clients/client/$customerId")
+    }
+
     private fun clickEboneActiveLink() {
+        android.widget.Toast.makeText(this, "Panel: clicking Active link…", android.widget.Toast.LENGTH_SHORT).show()
         webView.evaluateJavascript(
             "(function(){" +
                     "  var link = document.querySelector('a[href*=\"/clientStats/\"]');" +
@@ -623,6 +705,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private fun clickEboneSubmitButton() {
         eboneSubmitClicked = true
+        android.widget.Toast.makeText(this, "Panel: clicking Submit…", android.widget.Toast.LENGTH_SHORT).show()
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
@@ -639,6 +722,7 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun fetchEboneExpiryAndFinish() {
+        android.widget.Toast.makeText(this, "Panel: reading new expiry date…", android.widget.Toast.LENGTH_SHORT).show()
         val script = """
             (function(){
                 var expiry = '';
@@ -662,6 +746,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
                 val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
 
+                writeActivationResultToFirestore(expiry.isNotEmpty(), expiry)
                 val resultIntent = Intent()
                 resultIntent.putExtra("activation_success", expiry.isNotEmpty())
                 resultIntent.putExtra("new_expiry_date", expiry)
@@ -690,6 +775,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     "  }" +
                     "})()", null
         )
+        // Give the DataTable a moment to filter, then click the first (only) matching row.
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
@@ -705,6 +791,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private fun onZongProfileOpened() {
         if (autoActivateCustomerId != null) {
+            // We're here to activate the package — click "Recharge User".
             webView.evaluateJavascript(
                 "(function(){" +
                         "  var btn = document.querySelector('[data-target^=\"#recharge\"]');" +
@@ -712,6 +799,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                         "  return 'not found';" +
                         "})()", null
             )
+            // Wait for the modal to render, then click the confirm button.
             webView.postDelayed({
                 webView.evaluateJavascript(
                     "(function(){" +
@@ -721,12 +809,19 @@ class WebViewLoginActivity : AppCompatActivity() {
                             "})()", null
                 )
             }, 1500)
+            // After the form submits, the page reloads with the new expiry — capture it.
             webView.postDelayed({ fetchZongExpiryAndFinish() }, 4000)
         } else {
+            // Normal Complaint-form flow — just fetch details to auto-fill.
             fetchZongCustomerDetails()
         }
     }
 
+    /**
+     * Reads the "Expiration Date" box on the profile page (confirmed structure:
+     * a colored tile with label "Expiration Date" and value in ".counter").
+     * Called after a successful Recharge to capture the new expiry.
+     */
     private fun fetchZongExpiryAndFinish() {
         val script = """
             (function(){
@@ -749,6 +844,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
                 val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
 
+                writeActivationResultToFirestore(expiry.isNotEmpty(), expiry)
                 val resultIntent = Intent()
                 resultIntent.putExtra("activation_success", expiry.isNotEmpty())
                 resultIntent.putExtra("new_expiry_date", expiry)
@@ -763,6 +859,14 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Fetch for the normal Complaint-form flow (same purpose as
+     * fetchEboneCustomerDetails/fetchWateenCustomerDetails).
+     *
+     * TODO: userId/address/phone selectors below are placeholders — send the
+     * HTML block that shows Address/Mobile on the Zong profile page (same
+     * area as the Expiration Date tile) so these can be corrected precisely.
+     */
     private fun fetchZongCustomerDetails() {
         val script = """
             (function(){

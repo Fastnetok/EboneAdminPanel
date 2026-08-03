@@ -9,15 +9,26 @@ import com.example.eboneadminpanel.databinding.ActivityCustomerBillingBinding
 import com.example.eboneadminpanel.databinding.ItemNetworkRowBinding
 import com.example.eboneadminpanel.databinding.ItemTransactionRowBinding
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Customer Billing dashboard — shows today's payment activity across all
+ * three ISP panels (Ebone/Wateen/Zong), synced LIVE from Firestore (real-time
+ * listeners, not one-time fetches) — the screen updates itself the instant a
+ * new payment/mismatch appears, without needing to close and reopen the app.
+ */
 class CustomerBillingActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityCustomerBillingBinding
     private val db = FirebaseFirestore.getInstance()
+
+    private var statsListener: ListenerRegistration? = null
+    private var accountsListener: ListenerRegistration? = null
+    private var recentTxnListener: ListenerRegistration? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,9 +37,9 @@ class CustomerBillingActivity : AppCompatActivity() {
 
         binding.tvToday.text = SimpleDateFormat("EEE, dd MMM yyyy", Locale.getDefault()).format(Date())
 
-        loadTodaysTransactionStats()
-        loadAccountsOverview()
-        loadRecentTransactions()
+        startTodaysTransactionStatsListener()
+        startAccountsOverviewListener()
+        startRecentTransactionsListener()
 
         binding.btnMenu.setOnClickListener { finish() }
         binding.btnViewAllTransactions.setOnClickListener {
@@ -45,11 +56,12 @@ class CustomerBillingActivity : AppCompatActivity() {
         return cal.timeInMillis
     }
 
-    private fun loadTodaysTransactionStats() {
-        db.collection("transactions")
+    /** Today's Verified/Failed counts + earnings — live, updates automatically. */
+    private fun startTodaysTransactionStatsListener() {
+        statsListener = db.collection("transactions")
             .whereGreaterThanOrEqualTo("createdAt", startOfTodayMillis())
-            .get()
-            .addOnSuccessListener { snapshot ->
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot == null) return@addSnapshotListener
                 var verified = 0
                 var failed = 0
                 var earnings = 0.0
@@ -73,13 +85,18 @@ class CustomerBillingActivity : AppCompatActivity() {
             }
     }
 
-    private fun loadAccountsOverview() {
-        db.collection("customers").get()
-            .addOnSuccessListener { snapshot ->
+    /**
+     * Total/Active/Disabled accounts + package-speed breakdown + network
+     * (ISP provider) breakdown — live, from the "customers" collection.
+     */
+    private fun startAccountsOverviewListener() {
+        accountsListener = db.collection("customers")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot == null) return@addSnapshotListener
                 var active = 0
                 var disabled = 0
                 val speedCounts = mutableMapOf<String, Int>()
-                val networkCounts = mutableMapOf<String, Pair<Int, Double>>()
+                val networkCounts = mutableMapOf<String, Pair<Int, Double>>() // isp -> (count, earnings)
 
                 val nowCal = startOfTodayMillis()
 
@@ -146,12 +163,13 @@ class CustomerBillingActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadRecentTransactions() {
-        db.collection("transactions")
+    /** Live-updating "Recent Transactions" list — refreshes itself the instant Firestore changes. */
+    private fun startRecentTransactionsListener() {
+        recentTxnListener = db.collection("transactions")
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .limit(5)
-            .get()
-            .addOnSuccessListener { snapshot ->
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot == null) return@addSnapshotListener
                 binding.recentTransactionsContainer.removeAllViews()
                 for (doc in snapshot.documents) {
                     val customerId = doc.getString("customerId") ?: "—"
@@ -164,17 +182,66 @@ class CustomerBillingActivity : AppCompatActivity() {
                     row.tvTxnCustomerId.text = customerId
                     row.tvTxnMeta.text = "$source · $timeText"
 
-                    if (status == "VERIFIED") {
-                        row.tvTxnStatus.text = getString(R.string.status_verified)
-                        row.tvTxnStatus.setBackgroundResource(R.drawable.bg_chip_verified)
-                        row.tvTxnStatus.setTextColor(ContextCompat.getColor(this, R.color.status_success_text))
-                    } else {
-                        row.tvTxnStatus.text = getString(R.string.status_mismatch)
-                        row.tvTxnStatus.setBackgroundResource(R.drawable.bg_chip_mismatch)
-                        row.tvTxnStatus.setTextColor(ContextCompat.getColor(this, R.color.status_error_text))
+                    when (status) {
+                        "VERIFIED" -> {
+                            row.tvTxnStatus.text = getString(R.string.status_verified)
+                            row.tvTxnStatus.setBackgroundResource(R.drawable.bg_chip_verified)
+                            row.tvTxnStatus.setTextColor(ContextCompat.getColor(this, R.color.status_success_text))
+                        }
+                        "PENDING" -> {
+                            row.tvTxnStatus.text = "Waiting for SMS"
+                            row.tvTxnStatus.setBackgroundResource(R.drawable.bg_stat_card)
+                            row.tvTxnStatus.setTextColor(Color.parseColor("#5F5E5A"))
+
+                            row.root.setOnClickListener {
+                                androidx.appcompat.app.AlertDialog.Builder(this)
+                                    .setTitle("Clear this transaction?")
+                                    .setMessage("$customerId — $source, $timeText\n\nThis will delete the entry so the customer can submit their payment again.")
+                                    .setPositiveButton("Delete") { _, _ ->
+                                        db.collection("transactions").document(doc.id).delete()
+                                            .addOnSuccessListener {
+                                                android.widget.Toast.makeText(this, "Cleared — customer can retry now", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                            .addOnFailureListener { e ->
+                                                android.widget.Toast.makeText(this, "Delete failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .show()
+                            }
+                        }
+                        else -> {
+                            row.tvTxnStatus.text = getString(R.string.status_mismatch)
+                            row.tvTxnStatus.setBackgroundResource(R.drawable.bg_chip_mismatch)
+                            row.tvTxnStatus.setTextColor(ContextCompat.getColor(this, R.color.status_error_text))
+
+                            row.root.setOnClickListener {
+                                androidx.appcompat.app.AlertDialog.Builder(this)
+                                    .setTitle("Clear this transaction?")
+                                    .setMessage("$customerId — $source, $timeText\n\nThis will delete the failed entry so the customer can submit their payment again.")
+                                    .setPositiveButton("Delete") { _, _ ->
+                                        db.collection("transactions").document(doc.id).delete()
+                                            .addOnSuccessListener {
+                                                android.widget.Toast.makeText(this, "Cleared — customer can retry now", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                            .addOnFailureListener { e ->
+                                                android.widget.Toast.makeText(this, "Delete failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                    }
+                                    .setNegativeButton("Cancel", null)
+                                    .show()
+                            }
+                        }
                     }
                     binding.recentTransactionsContainer.addView(row.root)
                 }
             }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        statsListener?.remove()
+        accountsListener?.remove()
+        recentTxnListener?.remove()
     }
 }

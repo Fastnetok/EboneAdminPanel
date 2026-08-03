@@ -1,6 +1,8 @@
 package com.example.eboneadminpanel
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.os.Build
@@ -8,8 +10,10 @@ import android.os.Bundle
 import android.text.InputType
 import android.widget.EditText
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import android.location.Location
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
@@ -24,6 +28,21 @@ import com.google.firebase.database.*
 
 class MainActivity : AppCompatActivity(),
     OnMapReadyCallback {
+
+    // NEW: requests RECEIVE_SMS + READ_SMS + POST_NOTIFICATIONS at runtime
+    // together — declaring them in the manifest alone is not enough.
+    // This is what lets PaymentActivationService receive SMS AND show
+    // its "Tap to Activate" notification with sound, without the user
+    // ever needing to open Phone Settings manually.
+    private val startupPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions.values.all { it }) {
+            ContextCompat.startForegroundService(this, Intent(this, PaymentActivationService::class.java))
+        } else {
+            android.widget.Toast.makeText(this, "SMS aur Notification permission zaroori hai payment auto-activation ke liye", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     private lateinit var mMap: GoogleMap
     private var hasCenteredCameraOnce = false
@@ -54,7 +73,22 @@ class MainActivity : AppCompatActivity(),
 
         setContentView(R.layout.activity_admin_dashboard)
 
-        androidx.core.content.ContextCompat.startForegroundService(this, Intent(this, PaymentActivationService::class.java))
+        // NEW: check + request SMS AND Notification permissions together
+        // before starting the payment listener service (was previously
+        // requesting nothing for SMS, and requesting notification
+        // separately/later in loadDashboardCounters()).
+        val neededPermissions = mutableListOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            neededPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val allGranted = neededPermissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) {
+            ContextCompat.startForegroundService(this, Intent(this, PaymentActivationService::class.java))
+        } else {
+            startupPermissionLauncher.launch(neededPermissions.toTypedArray())
+        }
 
         VersionChecker.checkForUpdate(this)
 
@@ -473,20 +507,6 @@ class MainActivity : AppCompatActivity(),
 
     private fun loadDashboardCounters() {
         AdminNotificationListener.startListening(this)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (androidx.core.content.ContextCompat.checkSelfPermission(
-                    this,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                androidx.core.app.ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
-                    1001
-                )
-            }
-        }
         FirebaseDatabase
             .getInstance()
             .getReference("complaints")
