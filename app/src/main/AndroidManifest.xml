@@ -157,6 +157,7 @@
             android:exported="false" />
         <activity android:name=".CustomerBillingActivity" android:exported="false" />
         <activity android:name=".AddCustomerActivity" android:exported="false" />
+        <activity android:name=".AddEmployeeActivity" android:exported="false" />
 
         <!-- NEW: required for in-app APK install (Update Now flow) -->
         <provider

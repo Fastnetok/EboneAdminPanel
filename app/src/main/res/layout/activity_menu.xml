@@ -93,6 +93,15 @@
             android:textSize="18sp"/>
 
         <TextView
+            android:id="@+id/menuAddEmployee"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Add Employee"
+            android:textSize="18sp"/>
+
+        <TextView
             android:id="@+id/menuLogout"
             android:layout_width="match_parent"
             android:layout_height="55dp"

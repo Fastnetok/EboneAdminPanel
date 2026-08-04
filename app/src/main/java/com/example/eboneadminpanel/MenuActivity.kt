@@ -40,6 +40,10 @@ class MenuActivity : AppCompatActivity() {
         val addCustomer =
             findViewById<TextView>(R.id.menuAddCustomer)
 
+        // NEW: Add Employee (Name + PIN, for Ebone Field Manager registration)
+        val addEmployee =
+            findViewById<TextView>(R.id.menuAddEmployee)
+
         // NEW
         val logout =
             findViewById<TextView>(R.id.menuLogout)
@@ -76,6 +80,11 @@ class MenuActivity : AppCompatActivity() {
 // NEW: Add Customer form
         addCustomer.setOnClickListener {
             startActivity(Intent(this, AddCustomerActivity::class.java))
+        }
+
+        // NEW: Add Employee form
+        addEmployee.setOnClickListener {
+            startActivity(Intent(this, AddEmployeeActivity::class.java))
         }
 
         // NEW: Logout — asks for confirmation, then signs out of Firebase,
