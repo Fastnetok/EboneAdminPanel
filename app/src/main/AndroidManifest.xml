@@ -13,7 +13,6 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <!-- NEW: needed for in-app APK download + auto-install-prompt update flow -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature
@@ -21,6 +20,7 @@
         android:required="false" />
 
     <application
+        android:name=".EboneAdminApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -33,9 +33,6 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyBo1bsDO5BIGU8Mt-u_xYfzeN4Ez1BFW84" />
 
-        <activity
-            android:name=".ApprovedDevicesActivity"
-            android:exported="false" />
         <activity
             android:name=".PendingDevicesActivity"
             android:exported="false" />
@@ -155,11 +152,21 @@
             android:name=".PaymentActivationService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
         <activity android:name=".CustomerBillingActivity" android:exported="false" />
         <activity android:name=".AddCustomerActivity" android:exported="false" />
+        <activity android:name=".IspPanelSettingsActivity" android:exported="false" />
         <activity android:name=".AddEmployeeActivity" android:exported="false" />
+        <activity android:name=".SmsMatchSettingsActivity" android:exported="false" />
+        <activity android:name=".AppVersionActivity" android:exported="false" />
+        <activity android:name=".CustomerListActivity" android:exported="false" />
+        <activity android:name=".BiometricAttendanceActivity" android:exported="false" />
+        <activity android:name=".OfficeGeofenceActivity" android:exported="false" />
+        <activity android:name=".SalaryHistoryActivity" android:exported="false" />
+        <activity android:name=".AllSalaryTotalActivity" android:exported="false" />
+        <activity android:name=".OfficeTimmingsActivity" android:exported="false" />
 
-        <!-- NEW: required for in-app APK install (Update Now flow) -->
+        <!-- Required for in-app APK install (Update Now flow) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -169,6 +176,19 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths" />
         </provider>
+        <receiver
+            android:name=".PaymentSmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".PaymentActivationService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
     </application>
 
 </manifest>

@@ -198,13 +198,15 @@ class MainActivity : AppCompatActivity(),
         mMap.mapType =
             GoogleMap.MAP_TYPE_SATELLITE
 
+        mMap.uiSettings.isMapToolbarEnabled = true
+
         mMap.setOnMarkerClickListener { marker ->
             followedEmployeeName = marker.title
             mMap.animateCamera(
                 CameraUpdateFactory.newLatLngZoom(marker.position, 18f)
             )
             marker.showInfoWindow()
-            true
+            false  // ← Ab Toolbar Nazar Aayega
         }
 
         mMap.setOnMapLongClickListener { latLng ->

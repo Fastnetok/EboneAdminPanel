@@ -1,5 +1,10 @@
 package com.example.eboneadminpanel
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.Toast
@@ -12,6 +17,8 @@ class AddCustomerActivity : AppCompatActivity() {
     private lateinit var binding: ActivityAddCustomerBinding
     private val db = FirebaseFirestore.getInstance()
     private var currentPin: String = ""
+    private var lastSavedCustomerId: String = ""
+    private var lastSavedPin: String = ""
 
     private val companies = listOf("EBONE", "WATEEN", "ZONG")
 
@@ -27,17 +34,29 @@ class AddCustomerActivity : AppCompatActivity() {
         generateNewPin()
 
         binding.switchExistingCustomer.setOnCheckedChangeListener { _, isChecked ->
-            binding.layoutDaysRemaining.visibility = if (isChecked) android.view.View.VISIBLE else android.view.View.GONE
+            binding.layoutDaysRemaining.visibility =
+                if (isChecked) android.view.View.VISIBLE else android.view.View.GONE
         }
 
         binding.btnBack.setOnClickListener { finish() }
         binding.btnRegeneratePin.setOnClickListener { generateNewPin() }
         binding.btnSaveCustomer.setOnClickListener { saveCustomer() }
+
+        // Copy PIN on tap
+        binding.tvGeneratedPin.setOnClickListener {
+            copyToClipboard(currentPin)
+            Toast.makeText(this, "PIN copied!", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun generateNewPin() {
         currentPin = (100000..999999).random().toString()
         binding.tvGeneratedPin.text = currentPin
+    }
+
+    private fun copyToClipboard(text: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("PIN", text))
     }
 
     private fun saveCustomer() {
@@ -61,7 +80,10 @@ class AddCustomerActivity : AppCompatActivity() {
         db.collection("customers").document(customerId).get()
             .addOnSuccessListener { existing ->
                 if (existing.exists()) {
-                    showResult("A customer with ID \"$customerId\" already exists. Choose a different ID.", isError = true)
+                    showResult(
+                        "A customer with ID \"$customerId\" already exists. Choose a different ID.",
+                        isError = true
+                    )
                     binding.btnSaveCustomer.isEnabled = true
                     return@addOnSuccessListener
                 }
@@ -69,14 +91,19 @@ class AddCustomerActivity : AppCompatActivity() {
                 val billingCycleDays = 30
                 var lastPaymentDate: Long? = null
                 if (binding.switchExistingCustomer.isChecked) {
-                    val daysRemaining = binding.etDaysRemaining.text.toString().trim().toIntOrNull()
+                    val daysRemaining =
+                        binding.etDaysRemaining.text.toString().trim().toIntOrNull()
                     if (daysRemaining == null) {
-                        showResult("Please enter Days Remaining Until Expiry (a whole number).", isError = true)
+                        showResult(
+                            "Please enter Days Remaining Until Expiry (a whole number).",
+                            isError = true
+                        )
                         binding.btnSaveCustomer.isEnabled = true
                         return@addOnSuccessListener
                     }
                     val msPerDay = 24L * 60L * 60L * 1000L
-                    lastPaymentDate = System.currentTimeMillis() + (daysRemaining - billingCycleDays) * msPerDay
+                    lastPaymentDate =
+                        System.currentTimeMillis() + (daysRemaining - billingCycleDays) * msPerDay
                 }
 
                 val data = hashMapOf(
@@ -94,13 +121,19 @@ class AddCustomerActivity : AppCompatActivity() {
 
                 db.collection("customers").document(customerId).set(data)
                     .addOnSuccessListener {
+                        lastSavedCustomerId = customerId
+                        lastSavedPin = currentPin
+
                         showResult(
                             "✅ Customer \"$customerId\" created!\n\n" +
                                     "Company: $company\nPackage: $packageName — Rs. ${"%.0f".format(price)}\n\n" +
-                                    "Send this to the Employee via WhatsApp:\nID: $customerId\nPIN: $currentPin",
+                                    "Share login details with the customer below.",
                             isError = false
                         )
-                        Toast.makeText(this, "Customer saved successfully", Toast.LENGTH_SHORT).show()
+
+                        // Show share buttons
+                        showShareDialog(customerId, currentPin)
+
                         binding.etCustomerId.text.clear()
                         binding.etPackage.text.clear()
                         binding.etPrice.text.clear()
@@ -120,10 +153,62 @@ class AddCustomerActivity : AppCompatActivity() {
             }
     }
 
+    private fun showShareDialog(customerId: String, pin: String) {
+        val message = buildShareMessage(customerId, pin)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Share Login Details")
+            .setMessage("Send account details to customer:")
+            .setPositiveButton("📱 WhatsApp") { _, _ ->
+                shareViaWhatsApp(message)
+            }
+            .setNeutralButton("💬 SMS") { _, _ ->
+                shareViaSms(message)
+            }
+            .setNegativeButton("Skip", null)
+            .show()
+    }
+
+    private fun buildShareMessage(customerId: String, pin: String): String {
+        return "🌐 *Your Internet Account is Ready!*\n\n" +
+                "User ID: *$customerId*\n" +
+                "PIN: *$pin*\n\n" +
+                "Download the app and activate your account using these details.\n\n" +
+                "_Keep this PIN safe — it's used to activate your account._"
+    }
+
+    private fun shareViaWhatsApp(message: String) {
+        try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                setPackage("com.whatsapp")
+                putExtra(Intent.EXTRA_TEXT, message)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            // WhatsApp not installed — fall back to general share
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, message)
+            }
+            startActivity(Intent.createChooser(intent, "Share via WhatsApp"))
+        }
+    }
+
+    private fun shareViaSms(message: String) {
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("smsto:")
+            putExtra("sms_body", message)
+        }
+        startActivity(intent)
+    }
+
     private fun showResult(message: String, isError: Boolean) {
         binding.tvResult.visibility = android.view.View.VISIBLE
         binding.tvResult.text = message
-        binding.tvResult.setBackgroundResource(if (isError) R.drawable.bg_stat_danger else R.drawable.bg_stat_success)
+        binding.tvResult.setBackgroundResource(
+            if (isError) R.drawable.bg_stat_danger else R.drawable.bg_stat_success
+        )
         binding.tvResult.setTextColor(
             android.graphics.Color.parseColor(if (isError) "#C62828" else "#1B5E20")
         )

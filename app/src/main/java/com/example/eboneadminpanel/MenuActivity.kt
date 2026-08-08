@@ -3,110 +3,56 @@ package com.example.eboneadminpanel
 import android.content.Intent
 import android.os.Bundle
 import android.widget.TextView
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.auth.FirebaseAuth
 
-class MenuActivity : AppCompatActivity() {
+class MenuActivity : BaseAdminActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContentView(R.layout.activity_menu)
 
-        val addComplaint =
-            findViewById<TextView>(R.id.menuAddComplaint)
-
-        val pendingDevices =
-            findViewById<TextView>(R.id.menuPendingDevices)
-
-        val allEmployees =
-            findViewById<TextView>(R.id.menuAllEmployees)
-
-        val reports =
-            findViewById<TextView>(R.id.menuReports)
-
-        val movementTracking =
-            findViewById<TextView>(R.id.menuMovementTracking)
-
-        val settings =
-            findViewById<TextView>(R.id.menuSettings)
-
-        // NEW
-        val customerBilling =
-            findViewById<TextView>(R.id.menuCustomerBilling)
-
-        // NEW
-        val addCustomer =
-            findViewById<TextView>(R.id.menuAddCustomer)
-
-        // NEW: Add Employee (Name + PIN, for Ebone Field Manager registration)
-        val addEmployee =
-            findViewById<TextView>(R.id.menuAddEmployee)
-
-        // NEW
-        val logout =
-            findViewById<TextView>(R.id.menuLogout)
-
-        addComplaint.setOnClickListener {
+        findViewById<TextView>(R.id.menuAddComplaint).setOnClickListener {
             startActivity(Intent(this, AddComplaintActivity::class.java))
         }
-
-        reports.setOnClickListener {
-            startActivity(Intent(this, ReportsActivity::class.java))
+        findViewById<TextView>(R.id.menuBiometricAttendance).setOnClickListener {
+            startActivity(Intent(this, BiometricAttendanceActivity::class.java))
         }
-
-        movementTracking.setOnClickListener {
-            startActivity(Intent(this, MovementTrackingActivity::class.java))
+        findViewById<TextView>(R.id.menuOfficeTimings).setOnClickListener {
+            startActivity(Intent(this, OfficeTimmingsActivity::class.java))
         }
-
-        pendingDevices.setOnClickListener {
-            startActivity(Intent(this, PendingDevicesActivity::class.java))
+        findViewById<TextView>(R.id.menuAppVersion).setOnClickListener {
+            startActivity(Intent(this, AppVersionActivity::class.java))
         }
-
-        allEmployees.setOnClickListener {
-            startActivity(Intent(this, AllEmployeesActivity::class.java))
-        }
-
-        settings.setOnClickListener {
-            startActivity(Intent(this, ManagementToolsActivity::class.java))
-        }
-
-        // NEW: Customer Billing dashboard
-        customerBilling.setOnClickListener {
-            startActivity(Intent(this, CustomerBillingActivity::class.java))
-        }
-
-// NEW: Add Customer form
-        addCustomer.setOnClickListener {
-            startActivity(Intent(this, AddCustomerActivity::class.java))
-        }
-
-        // NEW: Add Employee form
-        addEmployee.setOnClickListener {
+        findViewById<TextView>(R.id.menuAddEmployee).setOnClickListener {
             startActivity(Intent(this, AddEmployeeActivity::class.java))
         }
-
-        // NEW: Logout — asks for confirmation, then signs out of Firebase,
-        // clears the saved local PIN, and sends the user back to the very
-        // start of the login flow (clearing the whole activity back-stack
-        // so pressing "back" can't return to the dashboard).
-        logout.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Logout")
-                .setMessage("Are you sure you want to logout?")
-                .setPositiveButton("Logout") { _, _ ->
-                    FirebaseAuth.getInstance().signOut()
-                    SetPinActivity.clearPin(this)
-
-                    val intent = Intent(this, LoginActivity::class.java)
-                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    startActivity(intent)
-                    finish()
-                }
-                .setNegativeButton("Cancel", null)
-                .show()
+        findViewById<TextView>(R.id.menuAllEmployees).setOnClickListener {
+            startActivity(Intent(this, AllEmployeesActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuReports).setOnClickListener {
+            startActivity(Intent(this, ReportsActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuMovementTracking).setOnClickListener {
+            startActivity(Intent(this, MovementTrackingActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuCustomerBilling).setOnClickListener {
+            startActivity(Intent(this, CustomerBillingActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuAddCustomer).setOnClickListener {
+            startActivity(Intent(this, AddCustomerActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuIspPanelSettings).setOnClickListener {
+            startActivity(Intent(this, IspPanelSettingsActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuSmsMatchSettings).setOnClickListener {
+            startActivity(Intent(this, SmsMatchSettingsActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuSettings)?.setOnClickListener {
+            startActivity(Intent(this, SetPinActivity::class.java))
+        }
+        findViewById<TextView>(R.id.menuLogout).setOnClickListener {
+            FirebaseAuth.getInstance().signOut()
+            finish()
         }
     }
 }
