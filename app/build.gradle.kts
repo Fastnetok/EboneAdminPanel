@@ -26,11 +26,11 @@ android {
                 file("D:/AndroidKeys/EboneReleaseKey.jks")
             }
 
-            storePassword = System.getenv("STORE_PASSWORD") ?: "aeiougabbas"
+            storePassword = System.getenv("STORE_PASSWORD") ?: "adminpakistan"
 
             keyAlias = System.getenv("KEY_ALIAS") ?: "ebone"
 
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "aeiougabbas"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "adminpakistan"
         }
     }
 
@@ -38,10 +38,9 @@ android {
         applicationId = "com.example.eboneadminpanel"
         minSdk = 24
         targetSdk = 36
-
-
-        testInstrumentationRunner =
-            "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 29
+        versionName = "1.0.29"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRenderer"
     }
 
     buildTypes {
