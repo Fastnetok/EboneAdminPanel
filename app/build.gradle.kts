@@ -26,11 +26,11 @@ android {
                 file("D:/AndroidKeys/EboneReleaseKey.jks")
             }
 
-            storePassword = System.getenv("STORE_PASSWORD") ?: "adminpakistan"
+            storePassword = System.getenv("STORE_PASSWORD") ?: "aeiougabbas"
 
             keyAlias = System.getenv("KEY_ALIAS") ?: "ebone"
 
-            keyPassword = System.getenv("KEY_PASSWORD") ?: "adminpakistan"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "aeiougabbas"
         }
     }
 
