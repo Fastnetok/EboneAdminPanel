@@ -29,16 +29,8 @@ class EboneAdminApp : Application() {
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) {
                 foregroundActivity = activity
-                val name = activity.javaClass.simpleName
-                // Only show popup on main working screens — not login/unlock/pin
-                val isMainScreen = name == "MenuActivity" || name == "MainActivity" ||
-                        name == "BiometricAttendanceActivity" ||
-                        name == "OfficeTimmingsActivity"
-                if (pendingPopups.isNotEmpty() && isMainScreen) {
                     val copy = pendingPopups.toList()
                     pendingPopups.clear()
-                    copy.forEach { (eName, reason, key) ->
-                        showLeavePopup(eName, reason, key)
                     }
                 }
             }
@@ -106,20 +98,8 @@ class EboneAdminApp : Application() {
         }
     }
 
-    private fun showOrQueue(empName: String, reason: String, key: String) {
         val activity = foregroundActivity
-        val screenName = activity?.javaClass?.simpleName ?: ""
-        // Show only on main working screens
-        val isMainScreen = screenName == "MenuActivity" || screenName == "MainActivity" ||
-                screenName == "BiometricAttendanceActivity" ||
-                screenName == "OfficeTimmingsActivity"
-        if (activity != null && !activity.isFinishing && isMainScreen) {
-            showLeavePopup(empName, reason, key)
         } else {
-            // Queue — will show when admin reaches main screen
-            if (pendingPopups.none { it.third == key }) {
-                pendingPopups.add(Triple(empName, reason, key))
-            }
         }
     }
 
