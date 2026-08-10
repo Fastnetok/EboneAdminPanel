@@ -1,0 +1,179 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+
+    id("com.google.gms.google-services")
+}
+
+android {
+    namespace = "com.example.eboneadminpanel"
+
+    compileSdk = 36
+
+    signingConfigs {
+
+        create("release") {
+
+            val isGitHub = System.getenv("GITHUB_ACTIONS") == "true"
+
+            // FIXED: was file("app/keystore.jks") which resolved to
+            // app/app/keystore.jks (this file already lives inside app/
+            // module). Workflow creates the keystore at app/keystore.jks
+            // (relative to repo root), so paths must match exactly.
+            storeFile = if (isGitHub) {
+                file("keystore.jks")
+            } else {
+                file("D:/AndroidKeys/EboneReleaseKey.jks")
+            }
+
+            storePassword = System.getenv("STORE_PASSWORD") ?: "aeiougabbas"
+
+            keyAlias = System.getenv("KEY_ALIAS") ?: "ebone"
+
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "aeiougabbas"
+        }
+    }
+
+    defaultConfig {
+        applicationId = "com.example.eboneadminpanel"
+        minSdk = 24
+        targetSdk = 36
+
+        versionCode = 28
+        versionName = "1.0.28"
+
+        testInstrumentationRunner =
+            "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
+
+        release {
+            signingConfig = signingConfigs.getByName("release")
+
+            isMinifyEnabled = false
+
+            proguardFiles(
+                getDefaultProguardFile(
+                    "proguard-android-optimize.txt"
+                ),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility =
+            JavaVersion.VERSION_11
+
+        targetCompatibility =
+            JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        compose = true
+        viewBinding = true
+    }
+}
+
+dependencies {
+
+    implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
+    implementation("com.google.firebase:firebase-firestore-ktx:24.10.1")
+
+    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
+
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    implementation("com.google.firebase:firebase-database")
+
+    implementation("com.google.android.gms:play-services-maps:19.0.0")
+
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    implementation("androidx.appcompat:appcompat:1.7.0")
+
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    implementation(
+        platform(
+            libs.androidx.compose.bom
+        )
+    )
+
+    implementation(
+        libs.androidx.activity.compose
+    )
+    implementation(libs.androidx.activity.ktx)
+
+    implementation(
+        libs.androidx.compose.material3
+    )
+
+    implementation(
+        libs.androidx.compose.ui
+    )
+
+    implementation(
+        libs.androidx.compose.ui.graphics
+    )
+
+    implementation(
+        libs.androidx.compose.ui.tooling.preview
+    )
+    implementation(libs.androidx.constraintlayout)
+
+    implementation(
+        libs.androidx.core.ktx
+    )
+
+    implementation(
+        libs.androidx.lifecycle.runtime.ktx
+    )
+    implementation(libs.material)
+
+    testImplementation(
+        libs.junit
+    )
+
+    androidTestImplementation(
+        platform(
+            libs.androidx.compose.bom
+        )
+    )
+
+    androidTestImplementation(
+        libs.androidx.compose.ui.test.junit4
+    )
+
+    androidTestImplementation(
+        libs.androidx.espresso.core
+    )
+
+    androidTestImplementation(
+        libs.androidx.junit
+    )
+
+    debugImplementation(
+        libs.androidx.compose.ui.test.manifest
+    )
+
+    debugImplementation(
+        libs.androidx.compose.ui.tooling
+    )
+}
+// test1

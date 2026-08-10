@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="280dp"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FFFFFF">
+
+    <!-- HEADER -->
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="90dp"
+        android:background="#0D47A1"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="EBONE ADMIN PANEL"
+        android:textColor="#FFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold"/>
+
+    <!-- MENU ITEMS -->
+
+    <TextView
+        android:id="@+id/menuDashboard"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Dashboard"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuEmployees"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="All Employees"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuPending"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Pending Requests"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuGeoFence"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Geo Fence"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuTracking"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Live Tracking"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuComplaints"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Complaints"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuAssigned"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Assigned Complaints"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuResolved"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Resolved Complaints"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuReports"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Reports"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuSettings"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Settings"
+        android:textSize="18sp"/>
+
+    <TextView
+        android:id="@+id/menuLogout"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:text="Logout"
+        android:textSize="18sp"/>
+
+</LinearLayout>

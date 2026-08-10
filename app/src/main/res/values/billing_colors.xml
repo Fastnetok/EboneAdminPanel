@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="status_error_text">#C62828</color>
+    <color name="status_success_text">#1B5E20</color>
+</resources>

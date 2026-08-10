@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:paddingTop="35dp">
+
+    <Button
+        android:id="@+id/addEmployeeButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="+ ADD EMPLOYEE"
+        android:layout_margin="8dp"/>
+
+    <Button
+        android:id="@+id/selectEmployeeButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SELECT EMPLOYEE"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"/>
+
+    <TextView
+        android:id="@+id/selectedEmployeeText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No Employee Selected"
+        android:textStyle="bold"
+        android:textSize="16sp"
+        android:padding="10dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ASSIGNED COMPLAINTS"
+        android:textStyle="bold"
+        android:textSize="20sp"
+        android:padding="10dp"/>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerViewAssigned"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <Button
+        android:id="@+id/assignComplaintButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ASSIGN COMPLAINT"
+        android:layout_margin="8dp"/>
+
+</LinearLayout>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:background="#ECEFF1"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:layout_marginTop="50dp"
+        android:background="#455A64"
+        android:gravity="center"
+        android:text="EMPLOYEE REPORTS"
+        android:textColor="#FFFFFF"
+        android:textSize="22sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="5dp">
+
+        <Button
+            android:id="@+id/todayButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Today"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#455A64"
+            android:stateListAnimator="@null" />
+
+        <Button
+            android:id="@+id/filterButton"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="Filter ▾"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#455A64"
+            android:layout_marginStart="2dp"
+            android:stateListAnimator="@null" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginStart="5dp"
+        android:layout_marginEnd="5dp"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/searchEmployeeEditText"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_weight="1"
+            android:hint="🔍 Search Employee"
+            android:padding="12dp" />
+
+        <Button
+            android:id="@+id/sortToggleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="50dp"
+            android:layout_marginStart="6dp"
+            android:text="🔢 Total"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#455A64"
+            android:stateListAnimator="@null"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <!--
+        IMPORTANT: RecyclerView now owns all scrolling.
+        height=0dp + weight=1 makes it fill remaining space below the
+        fixed header controls above, and it re-measures correctly every
+        time notifyDataSetChanged() runs — this is what fixes the
+        "only one card shows" bug, since there is no parent ScrollView
+        collapsing its height anymore.
+    -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/reportsRecyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="12dp" />
+
+</LinearLayout>

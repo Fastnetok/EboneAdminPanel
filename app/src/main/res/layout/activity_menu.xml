@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#FFFFFF">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="90dp"
+            android:background="#0D47A1"
+            android:gravity="center"
+            android:text="ADMIN MENU"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold"/>
+
+        <!-- 1 -->
+        <TextView
+            android:id="@+id/menuAddComplaint"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="New Complaint"
+            android:textSize="18sp"/>
+
+        <!-- 2 NEW -->
+        <TextView
+            android:id="@+id/menuBiometricAttendance"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Employee Biometric Attendance"
+            android:textSize="18sp"/>
+
+        <!-- 3 NEW: Office Timings -->
+        <TextView
+            android:id="@+id/menuOfficeTimings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Office Timings"
+            android:textSize="18sp"/>
+
+        <!-- 4 NEW: App Version -->
+        <TextView
+            android:id="@+id/menuAppVersion"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="App Version Status"
+            android:textSize="18sp"/>
+
+        <!-- 5 -->
+        <TextView
+            android:id="@+id/menuAddEmployee"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Add Employee"
+            android:textSize="18sp"/>
+
+        <!-- 3 -->
+        <TextView
+            android:id="@+id/menuAllEmployees"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="All Employees"
+            android:textSize="18sp"/>
+
+        <!-- 4 -->
+        <TextView
+            android:id="@+id/menuReports"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Reports"
+            android:textSize="18sp"/>
+
+        <!-- 5 -->
+        <TextView
+            android:id="@+id/menuMovementTracking"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Movement Tracking"
+            android:textSize="18sp"/>
+
+        <!-- 6 -->
+        <TextView
+            android:id="@+id/menuCustomerBilling"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Customer Billing"
+            android:textSize="18sp"/>
+
+        <!-- 7 -->
+        <TextView
+            android:id="@+id/menuAddCustomer"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Add Customer"
+            android:textSize="18sp"/>
+
+        <!-- 8 -->
+        <TextView
+            android:id="@+id/menuIspPanelSettings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="ISP Panel Settings"
+            android:textSize="18sp"/>
+
+        <!-- 9 NEW -->
+        <TextView
+            android:id="@+id/menuSmsMatchSettings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="SMS Match Settings"
+            android:textSize="18sp"/>
+
+        <!-- 10 -->
+        <TextView
+            android:id="@+id/menuSettings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Settings"
+            android:textSize="18sp"/>
+
+        <!-- 11 -->
+        <TextView
+            android:id="@+id/menuLogout"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Logout"
+            android:textSize="18sp"/>
+
+    </LinearLayout>
+
+</ScrollView>
