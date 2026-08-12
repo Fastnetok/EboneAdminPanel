@@ -87,55 +87,58 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         tvMonth = tv("", 1f, Color.TRANSPARENT) // placeholder
         header.addView(titleBlock)
 
-        val geoBtn = Button(this).apply {
-            text = "Geofence"
-            textSize = 10f
-            setTextColor(Color.WHITE)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8f * dp
-                setColor(Color.parseColor("#1A3F7A"))
-            }
-            setPadding(px(10, dp), px(6, dp), px(10, dp), px(6, dp))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).also { it.marginStart = px(8, dp) }
-        }
-        geoBtn.setOnClickListener {
-            startActivity(android.content.Intent(this, OfficeGeofenceActivity::class.java))
-        }
-        header.addView(geoBtn)
+        root.addView(header)
 
-        val historyBtn = Button(this).apply {
-            text = "History"
-            textSize = 10f
-            setTextColor(Color.WHITE)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8f * dp
-                setColor(Color.parseColor("#2E5C1A"))
-            }
-            setPadding(px(10, dp), px(6, dp), px(10, dp), px(6, dp))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).also { it.marginStart = px(6, dp) }
+        // ── Button Row Below Header ──
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.parseColor("#0A2547"))
+            setPadding(px(12,dp), px(8,dp), px(12,dp), px(8,dp))
+            gravity = Gravity.CENTER_VERTICAL
         }
-        historyBtn.setOnClickListener {
-            if (selectedDeviceId.isEmpty()) {
-                showMsg("Select an employee first.")
-            } else {
+
+        fun actionBtn(label: String, color: String, onClick: () -> Unit): Button {
+            return Button(this).apply {
+                text = label; textSize = 11f; setTextColor(Color.WHITE)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE; cornerRadius = 8f*dp
+                    setColor(Color.parseColor(color))
+                }
+                setPadding(px(10,dp), px(6,dp), px(10,dp), px(6,dp))
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                ).also { it.marginEnd = px(4,dp) }
+                setOnClickListener { onClick() }
+            }
+        }
+
+        btnRow.addView(actionBtn("Geofence", "#1A3F7A") {
+            startActivity(android.content.Intent(this, OfficeGeofenceActivity::class.java))
+        })
+        btnRow.addView(actionBtn("History", "#2E5C1A") {
+            if (selectedDeviceId.isEmpty()) showMsg("Select an employee first.")
+            else {
                 val intent = android.content.Intent(this, SalaryHistoryActivity::class.java)
                 intent.putExtra("deviceId", selectedDeviceId)
                 intent.putExtra("employeeName", selectedEmployee)
                 intent.putExtra("baseSalary", baseSalary)
                 startActivity(intent)
             }
-        }
-        header.addView(historyBtn)
+        })
+        btnRow.addView(actionBtn("All Total", "#6A1B9A") {
+            startActivity(android.content.Intent(this, AllSalaryTotalActivity::class.java))
+        })
+        // "Time Log" button replaced with "Emp" — shows TODAY's attendance
+        // for every employee (who checked in today + at what time).
+        btnRow.addView(actionBtn("Emp", "#00695C") {
+            showTodayAllEmployeesAttendance()
+        }.also {
+            it.layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ).also { m -> m.marginEnd = 0 }
+        })
 
-        root.addView(header)
+        root.addView(btnRow)
 
         val scroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -224,13 +227,6 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         // ── Salary Card ──
         val salaryCard = card(dp)
         // Salary title — tap to set salary
-        val salaryTitle = tv("Salary Breakdown", 14f, Color.parseColor("#111111"), bold = true).also {
-            it.layoutParams = llp().also { m -> m.bottomMargin = px(8, dp) }
-            it.isClickable = true
-            it.isFocusable = true
-            it.setOnClickListener { showSetSalaryDialog() }
-        }
-        salaryCard.addView(salaryTitle)
         salaryCard.addView(divider(dp))
 
         // Office Hours row — just title + arrow, no time shown
@@ -659,9 +655,10 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             // Each employee row for this day
             names.forEach { name ->
                 val dayRec = attData[name]?.get(dayKey)
-                val checkIn = dayRec?.child("checkInTime")?.value?.toString() ?: ""
-                val checkOut = dayRec?.child("checkOutTime")?.value?.toString() ?: ""
-                val status = dayRec?.child("status")?.value?.toString() ?: ""
+                val dayAtt = dayRec?.let { readDayAttendance(it) }
+                val checkIn = dayAtt?.checkIn ?: ""
+                val checkOut = dayAtt?.checkOut ?: ""
+                val status = if (dayAtt?.isLate == true) "LATE" else if (dayAtt?.hasOvertimeSession == true) "OVERTIME" else ""
 
                 if (checkIn.isNotEmpty()) totalPresent++
                 if (status == "LATE") totalLate++
@@ -718,6 +715,201 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         tvScore.text = "$avgScore%"
         tvBaseSalary.text = "All (${names.size})"
         tvDeduction.text = "—"; tvOvertime.text = "—"; tvNetSalary.text = "—"
+    }
+
+    // ─────────────── TODAY — ALL EMPLOYEES ATTENDANCE (Emp button) ───────────────
+
+    /**
+     * Shows, for TODAY only, which employees have marked attendance and at
+     * what time — across every registered employee. Employees who have not
+     * checked in today are shown separately as "Not marked yet".
+     */
+    private fun showTodayAllEmployeesAttendance() {
+        val dp = resources.displayMetrics.density
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val todayLabel = SimpleDateFormat("EEE, dd MMM yyyy", Locale.getDefault()).format(Date())
+
+        val scroll = ScrollView(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(16, dp), px(8, dp), px(16, dp), px(8, dp))
+        }
+        scroll.addView(container)
+        container.addView(tv("Loading...", 13f, Color.parseColor("#9E9E9E")).also {
+            it.gravity = Gravity.CENTER
+            it.setPadding(0, px(20, dp), 0, px(20, dp))
+        })
+
+        AlertDialog.Builder(this)
+            .setTitle("Today's Attendance — $todayLabel")
+            .setView(scroll)
+            .setPositiveButton("Close", null)
+            .show()
+
+        val allNames = employeeMap.keys.sorted()
+        if (allNames.isEmpty()) {
+            container.removeAllViews()
+            container.addView(tv("No employees found.", 13f, Color.parseColor("#9E9E9E")).also {
+                it.gravity = Gravity.CENTER
+            })
+            return
+        }
+
+        var loaded = 0
+        // name -> (checkIn, checkOut, status) or null if no record today
+        val results = mutableMapOf<String, Triple<String, String, String>?>()
+
+        allNames.forEach { name ->
+            val did = employeeMap[name]
+            if (did == null) {
+                results[name] = null
+                loaded++
+                if (loaded >= allNames.size) {
+                    runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                }
+                return@forEach
+            }
+            db.getReference("attendance").child(did).child(todayKey)
+                .get()
+                .addOnSuccessListener { snap ->
+                    // NEW structure: attendance/{id}/{date}/sessions/{index}/...
+                    // Employees can check in multiple times a day, so pick the
+                    // FIRST session's check-in time and the LATEST session's
+                    // check-out time (or "active" if still checked in).
+                    val sessSnap = snap.child("sessions")
+                    val triple: Triple<String, String, String>? = if (sessSnap.exists()) {
+                        val sessions = sessSnap.children.toList()
+                        val firstCheckIn = sessions.firstOrNull {
+                            (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
+                        }?.child("checkInTime")?.value?.toString() ?: ""
+                        val lastCheckOut = sessions.lastOrNull {
+                            (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
+                        }?.child("checkOutTime")?.value?.toString() ?: ""
+                        val anyLateStatus = sessions.any {
+                            it.child("status").value?.toString() == "LATE"
+                        }
+                        if (firstCheckIn.isNotEmpty())
+                            Triple(firstCheckIn, lastCheckOut, if (anyLateStatus) "LATE" else "ON_TIME")
+                        else null
+                    } else {
+                        // OLD/legacy structure: checkInTime directly on the date node.
+                        val checkIn = snap.child("checkInTime").value?.toString() ?: ""
+                        val checkOut = snap.child("checkOutTime").value?.toString() ?: ""
+                        val status = snap.child("status").value?.toString() ?: ""
+                        if (checkIn.isNotEmpty()) Triple(checkIn, checkOut, status) else null
+                    }
+                    results[name] = triple
+                    loaded++
+                    if (loaded >= allNames.size) {
+                        runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                    }
+                }
+                .addOnFailureListener {
+                    results[name] = null
+                    loaded++
+                    if (loaded >= allNames.size) {
+                        runOnUiThread { renderTodayAllEmployeesAttendance(results, container, dp) }
+                    }
+                }
+        }
+    }
+
+    private fun renderTodayAllEmployeesAttendance(
+        results: Map<String, Triple<String, String, String>?>,
+        container: LinearLayout,
+        dp: Float
+    ) {
+        container.removeAllViews()
+        val names = results.keys.sorted()
+
+        val markedNames = names.filter { results[it] != null }
+        val notMarkedNames = names.filter { results[it] == null }
+
+        // ── Summary Row ──
+        val summaryRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.parseColor("#E8F5E9"))
+            setPadding(px(10, dp), px(10, dp), px(10, dp), px(10, dp))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE; cornerRadius = 8f * dp
+                setColor(Color.parseColor("#E8F5E9"))
+            }
+            layoutParams = llp().also { it.bottomMargin = px(10, dp) }
+        }
+        summaryRow.addView(tv("Marked: ${markedNames.size}", 13f, Color.parseColor("#2E7D32"), bold = true).also {
+            it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        summaryRow.addView(tv("Not Marked: ${notMarkedNames.size}", 13f, Color.parseColor("#C62828"), bold = true))
+        container.addView(summaryRow)
+
+        // ── Marked Employees ──
+        if (markedNames.isNotEmpty()) {
+            container.addView(tv("✅ Attendance Marked", 13f, Color.parseColor("#111111"), bold = true).also {
+                it.setPadding(0, px(6, dp), 0, px(6, dp))
+            })
+            markedNames.forEachIndexed { idx, name ->
+                val (checkIn, checkOut, status) = results[name]!!
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(px(8, dp), px(10, dp), px(8, dp), px(10, dp))
+                    setBackgroundColor(if (idx % 2 == 0) Color.parseColor("#FAFAFA") else Color.WHITE)
+                }
+                row.addView(tv(name, 13f, Color.parseColor("#333333"), bold = true).also {
+                    it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                val timeText = if (checkOut.isNotEmpty()) "$checkIn → $checkOut" else "$checkIn →"
+                row.addView(tv(timeText, 12f, Color.parseColor("#555555")).also {
+                    it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                val badgeText: String; val badgeColor: Int; val badgeBg: Int
+                when (status) {
+                    "LATE" -> { badgeText = "Late"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
+                    "OVERTIME" -> { badgeText = "OT"; badgeColor = Color.parseColor("#1565C0"); badgeBg = Color.parseColor("#E3F2FD") }
+                    else -> { badgeText = "On Time"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
+                }
+                row.addView(tv(badgeText, 10f, badgeColor, bold = true).also {
+                    it.background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = 8f * dp; setColor(badgeBg) }
+                    it.setPadding(px(6, dp), px(2, dp), px(6, dp), px(2, dp))
+                })
+                container.addView(row)
+                container.addView(View(this).apply {
+                    setBackgroundColor(Color.parseColor("#EEEEEE"))
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+                })
+            }
+        }
+
+        // ── Not Marked Employees ──
+        if (notMarkedNames.isNotEmpty()) {
+            container.addView(tv("❌ Not Marked Yet", 13f, Color.parseColor("#111111"), bold = true).also {
+                it.setPadding(0, px(14, dp), 0, px(6, dp))
+            })
+            notMarkedNames.forEachIndexed { idx, name ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(px(8, dp), px(10, dp), px(8, dp), px(10, dp))
+                    setBackgroundColor(if (idx % 2 == 0) Color.parseColor("#FAFAFA") else Color.WHITE)
+                }
+                row.addView(tv(name, 13f, Color.parseColor("#333333")).also {
+                    it.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                row.addView(tv("Not marked yet", 12f, Color.parseColor("#9E9E9E")))
+                container.addView(row)
+                container.addView(View(this).apply {
+                    setBackgroundColor(Color.parseColor("#EEEEEE"))
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+                })
+            }
+        }
+
+        if (names.isEmpty()) {
+            container.addView(tv("No employees found.", 13f, Color.parseColor("#9E9E9E")).also {
+                it.gravity = Gravity.CENTER
+                it.setPadding(0, px(20, dp), 0, px(20, dp))
+            })
+        }
     }
 
     // ─────────────── LOAD DATA ───────────────
@@ -804,10 +996,11 @@ class BiometricAttendanceActivity : AppCompatActivity() {
 
                     if (isFuture) continue
 
-                    val checkIn = dayRecord?.child("checkInTime")?.value?.toString() ?: ""
-                    val status = dayRecord?.child("status")?.value?.toString() ?: ""
-                    val ciTs = (dayRecord?.child("checkInTimestamp")?.value as? Long) ?: 0L
-                    val coTs = (dayRecord?.child("checkOutTimestamp")?.value as? Long) ?: 0L
+                    val dayAtt = dayRecord?.let { readDayAttendance(it) }
+                    val checkIn = dayAtt?.checkIn ?: ""
+                    val status = if (dayAtt?.isLate == true) "LATE" else if (dayAtt?.hasOvertimeSession == true) "OVERTIME" else ""
+                    val ciTs = dayAtt?.ciTs ?: 0L
+                    val coTs = dayAtt?.coTs ?: 0L
 
                     val waiveDeduction = override?.child("waiveDeduction")?.value as? Boolean ?: false
                     val fullRelief = override?.child("fullRelief")?.value as? Boolean ?: false
@@ -859,11 +1052,31 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 }
 
                 val present = presentDates.size
-                val absent = (1 until todayDay).count { d ->
-                    val dk = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
-                    dk !in presentDates
-                }
-                val score = if (todayDay > 0) ((present.toFloat() / todayDay) * 100).toInt() else 0
+
+                // FIX: Absent should only be counted from the employee's
+                // FIRST check-in date this month — not from day 1. If the
+                // employee has no attendance records at all this month yet
+                // (e.g. app just launched), absent must show 0, not the
+                // full elapsed day count.
+                val firstPresentDay = if (presentDates.isNotEmpty()) {
+                    try { presentDates.sorted().first().split("-").last().toInt() }
+                    catch (e: Exception) { todayDay }
+                } else todayDay
+
+                val absent = if (presentDates.isEmpty()) 0 else
+                    (firstPresentDay until todayDay).count { d ->
+                        val dk = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
+                        dk !in presentDates
+                    }
+
+                // FIX: Score is also calculated only over the days that
+                // have elapsed since the first check-in — not since day 1
+                // of the month — so a genuinely on-time employee doesn't
+                // show an artificially low score just because the app was
+                // installed mid-month.
+                val scoreDays = if (presentDates.isEmpty()) 1 else
+                    (todayDay - firstPresentDay + 1).coerceAtLeast(1)
+                val score = if (scoreDays > 0) ((present.toFloat() / scoreDays) * 100).toInt() else 0
 
                 val deductionAmt = (totalDeductionMins / 60.0) * hourlyRate
                 val overtimeAmt = (totalOvertimeMins / 60.0) * hourlyRate
@@ -891,9 +1104,10 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                     val dayKey = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
                     val dayRecord = recordMap[dayKey]
                     val override = overrides[dayKey]
-                    val checkIn = dayRecord?.child("checkInTime")?.value?.toString() ?: ""
-                    val checkOut = dayRecord?.child("checkOutTime")?.value?.toString() ?: ""
-                    val status = dayRecord?.child("status")?.value?.toString() ?: ""
+                    val dayAttLog = dayRecord?.let { readDayAttendance(it) }
+                    val checkIn = dayAttLog?.checkIn ?: ""
+                    val checkOut = dayAttLog?.checkOut ?: ""
+                    val status = if (dayAttLog?.isLate == true) "LATE" else if (dayAttLog?.hasOvertimeSession == true) "OVERTIME" else ""
                     val isFuture = currentMonthOffset == 0 && d > todayDay
                     val fullRelief = override?.child("fullRelief")?.value as? Boolean ?: false
                     val waived = override?.child("waiveDeduction")?.value as? Boolean ?: false
@@ -1031,18 +1245,32 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 val totalDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
                 val todayDay = if (currentMonthOffset == 0) Calendar.getInstance().get(Calendar.DAY_OF_MONTH) else totalDays
                 val recordMap = snap.children.associateBy { it.key ?: "" }
+
+                // Determine first present day this month (same rule as the
+                // main stats calculation) so "Absent" here never lists days
+                // before the employee's very first check-in. Reads BOTH the
+                // new sessions/ structure and the old flat structure.
+                val presentKeysThisMonth = recordMap.filter {
+                    readDayAttendance(it.value) != null
+                }.keys
+                val firstPresentDay = if (presentKeysThisMonth.isNotEmpty()) {
+                    try { presentKeysThisMonth.sorted().first().split("-").last().toInt() }
+                    catch (e: Exception) { todayDay }
+                } else todayDay
+
                 var count = 0
                 for (d in 1..totalDays) {
                     val dayKey = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
                     val rec = recordMap[dayKey]
-                    val ci = rec?.child("checkInTime")?.value?.toString() ?: ""
-                    val co = rec?.child("checkOutTime")?.value?.toString() ?: ""
-                    val st = rec?.child("status")?.value?.toString() ?: ""
+                    val dayAtt = rec?.let { readDayAttendance(it) }
+                    val ci = dayAtt?.checkIn ?: ""
+                    val co = dayAtt?.checkOut ?: ""
+                    val st = if (dayAtt?.isLate == true) "LATE" else if (dayAtt?.hasOvertimeSession == true) "OVERTIME" else ""
                     val isFuture = currentMonthOffset == 0 && d > todayDay
                     if (isFuture) continue
                     val show = when (type) {
                         "Present" -> ci.isNotEmpty()
-                        "Absent" -> ci.isEmpty() && d < todayDay
+                        "Absent" -> ci.isEmpty() && d < todayDay && d >= firstPresentDay && presentKeysThisMonth.isNotEmpty()
                         "Late" -> st == "LATE"
                         "Score" -> true
                         else -> false
@@ -1092,6 +1320,49 @@ class BiometricAttendanceActivity : AppCompatActivity() {
     private fun getMonthKey(): String {
         val cal = Calendar.getInstance().also { it.add(Calendar.MONTH, currentMonthOffset) }
         return SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(cal.time)
+    }
+
+    /**
+     * Reads a single day's attendance record supporting BOTH structures:
+     *  - NEW: attendance/{id}/{date}/sessions/{index}/checkInTime, etc.
+     *    (multiple check-ins/outs per day)
+     *  - OLD/legacy: attendance/{id}/{date}/checkInTime directly.
+     * Returns first check-in time, latest check-out time, whether ANY
+     * session was late, first check-in timestamp, latest check-out
+     * timestamp — or null if the employee has no record that day.
+     */
+    private data class DayAttendance(
+        val checkIn: String, val checkOut: String, val isLate: Boolean,
+        val ciTs: Long, val coTs: Long, val hasOvertimeSession: Boolean
+    )
+
+    private fun readDayAttendance(daySnap: DataSnapshot): DayAttendance? {
+        val sessSnap = daySnap.child("sessions")
+        if (sessSnap.exists()) {
+            val sessions = sessSnap.children.toList()
+            val firstWithCheckIn = sessions.firstOrNull {
+                (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
+            } ?: return null
+            val checkIn = firstWithCheckIn.child("checkInTime").value?.toString() ?: ""
+            if (checkIn.isEmpty()) return null
+            val lastWithCheckOut = sessions.lastOrNull {
+                (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
+            }
+            val checkOut = lastWithCheckOut?.child("checkOutTime")?.value?.toString() ?: ""
+            val isLate = sessions.any { it.child("status").value?.toString() == "LATE" }
+            val hasOT = sessions.any { it.child("status").value?.toString() == "OVERTIME" }
+            val ciTs = (firstWithCheckIn.child("checkInTimestamp").value as? Long) ?: 0L
+            val coTs = (lastWithCheckOut?.child("checkOutTimestamp")?.value as? Long) ?: 0L
+            return DayAttendance(checkIn, checkOut, isLate, ciTs, coTs, hasOT)
+        }
+        // Legacy flat structure
+        val checkIn = daySnap.child("checkInTime").value?.toString() ?: ""
+        if (checkIn.isEmpty()) return null
+        val checkOut = daySnap.child("checkOutTime").value?.toString() ?: ""
+        val status = daySnap.child("status").value?.toString() ?: ""
+        val ciTs = (daySnap.child("checkInTimestamp").value as? Long) ?: 0L
+        val coTs = (daySnap.child("checkOutTimestamp").value as? Long) ?: 0L
+        return DayAttendance(checkIn, checkOut, status == "LATE", ciTs, coTs, status == "OVERTIME")
     }
 
     private fun px(v: Int, dp: Float) = (v * dp).toInt()

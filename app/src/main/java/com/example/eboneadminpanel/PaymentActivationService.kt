@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.provider.Telephony
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -15,7 +17,7 @@ class PaymentActivationService : Service() {
 
     private var listener: ListenerRegistration? = null
     private val db = FirebaseFirestore.getInstance()
-    private val notifiedTransactionIds = mutableSetOf<String>()
+    private val processedTransactionIds = mutableSetOf<String>()
 
     companion object {
         const val CHANNEL_ID = "payment_activation_channel_v2"
@@ -38,12 +40,68 @@ class PaymentActivationService : Service() {
     private fun startListening() {
         listener = db.collection("transactions")
             .whereEqualTo("status", "PENDING")
-            .addSnapshotListener { snapshot, _ ->
-                snapshot?.documentChanges?.forEach { change ->
-                    val transactionId = change.document.id
-                    notifiedTransactionIds.add(transactionId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("PaymentActivationService", "Listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                snapshot?.documents?.forEach { doc ->
+                    val transactionId = doc.id
+                    if (!processedTransactionIds.contains(transactionId)) {
+                        processedTransactionIds.add(transactionId)
+                        val tid = doc.getString("bankTransactionId") ?: ""
+                        val amount = doc.getDouble("amount") ?: 0.0
+                        val customerId = doc.getString("customerId") ?: ""
+                        if (tid.isNotEmpty() && customerId.isNotEmpty()) {
+                            // SMS Inbox Scan Karo
+                            scanSmsInboxForTid(tid, transactionId, customerId)
+                        }
+                    }
                 }
             }
+    }
+
+    private fun scanSmsInboxForTid(tid: String, transactionId: String, customerId: String) {
+        try {
+            val matchWindowDays = SmsMatchSettingsActivity.getMatchWindowDays(this)
+            val windowStart = System.currentTimeMillis() - (matchWindowDays * 24L * 60L * 60L * 1000L)
+
+            val uri = Telephony.Sms.Inbox.CONTENT_URI
+            val projection = arrayOf(
+                Telephony.Sms.BODY,
+                Telephony.Sms.DATE
+            )
+            val selection = "${Telephony.Sms.DATE} >= ?"
+            val selectionArgs = arrayOf(windowStart.toString())
+            val sortOrder = "${Telephony.Sms.DATE} DESC"
+
+            val cursor = contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
+
+            cursor?.use { c ->
+                while (c.moveToNext()) {
+                    val body = c.getString(c.getColumnIndexOrThrow(Telephony.Sms.BODY)) ?: continue
+
+                    // TID Match Check
+                    if (body.contains(tid, ignoreCase = true)) {
+                        Log.d("PaymentActivationService", "TID MATCH FOUND in SMS: $tid")
+
+                        // Match Mila → Notification Show Karo
+                        PaymentNotificationHelper.showActivationNotification(
+                            this, transactionId, customerId
+                        )
+
+                        // Firestore Mein Mark Karo
+                        db.collection("transactions").document(transactionId)
+                            .update("smsMatched", true, "smsBody", body.take(200))
+
+                        return
+                    }
+                }
+                Log.d("PaymentActivationService", "TID not found in SMS inbox: $tid")
+            }
+        } catch (e: Exception) {
+            Log.e("PaymentActivationService", "SMS scan error: ${e.message}")
+        }
     }
 
     private fun buildForegroundNotification(): Notification {

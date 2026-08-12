@@ -109,6 +109,17 @@ class SmsMatchSettingsActivity : AppCompatActivity() {
         radioGroup.addView(rb7)
         content.addView(radioGroup)
 
+        // FIX: if the saved value isn't one of the standard radio options
+        // (1, 2, 3, 7), it must have come from the custom field — so none
+        // of the radio buttons get checked above, which used to make it
+        // look like the setting had "disappeared" even though it was
+        // still saved correctly. Un-check all radios in that case, since
+        // the custom field below will show/represent the real value.
+        val isStandardValue = savedDays in setOf(1, 2, 3, 7)
+        if (!isStandardValue) {
+            radioGroup.clearCheck()
+        }
+
         // Custom days input
         val customLabel = TextView(this).apply {
             text = "Custom number of days:"
@@ -122,7 +133,7 @@ class SmsMatchSettingsActivity : AppCompatActivity() {
         content.addView(customLabel)
 
         val customEt = EditText(this).apply {
-            hint = "e.g. 5"
+            hint = "e.g. 360"
             inputType = InputType.TYPE_CLASS_NUMBER
             textSize = 14f
             setBackgroundColor(android.graphics.Color.WHITE)
@@ -130,6 +141,11 @@ class SmsMatchSettingsActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(
                 (120*dp).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT
             ).also { it.bottomMargin = (16*dp).toInt() }
+            // FIX: restore the previously saved custom value so it doesn't
+            // look "gone" when reopening this screen.
+            if (!isStandardValue) {
+                setText(savedDays.toString())
+            }
         }
         content.addView(customEt)
 
@@ -147,7 +163,10 @@ class SmsMatchSettingsActivity : AppCompatActivity() {
                 // Custom input takes priority if filled
                 val customText = customEt.text.toString().trim()
                 val days = if (customText.isNotEmpty()) {
-                    customText.toIntOrNull()?.coerceIn(1, 30) ?: 1
+                    // FIX: was coerceIn(1, 30), which silently capped any
+                    // custom entry (like 360) down to 30 with no warning.
+                    // Now allows up to 3650 days (~10 years).
+                    customText.toIntOrNull()?.coerceIn(1, 3650) ?: 1
                 } else {
                     when (radioGroup.checkedRadioButtonId) {
                         rb2.id -> 2
@@ -158,6 +177,13 @@ class SmsMatchSettingsActivity : AppCompatActivity() {
                 }
                 getSharedPreferences("sms_match_prefs", Context.MODE_PRIVATE)
                     .edit().putInt("match_window_days", days).apply()
+
+                Toast.makeText(
+                    this@SmsMatchSettingsActivity,
+                    "Saved: $days day(s)",
+                    Toast.LENGTH_SHORT
+                ).show()
+
                 finish()
             }
         }

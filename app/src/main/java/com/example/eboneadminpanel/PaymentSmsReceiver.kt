@@ -10,6 +10,18 @@ import java.util.Calendar
 
 class PaymentSmsReceiver : BroadcastReceiver() {
 
+    // ===================== VERIFIED SENDERS =====================
+    // Sirf Inhi Numbers/Names Se SMS Aaye To Valid
+    private val verifiedSenders = mapOf(
+        "JAZZCASH"     to listOf("8558", "JazzCash", "JAZZCASH", "Jazz Cash"),
+        "EASYPAISA"    to listOf("3737", "Easypaisa", "EASYPAISA", "Easy Paisa"),
+        "SADAPAY"      to listOf("SadaPay", "SADAPAY", "Sada Pay", "8988"),
+        "BANK_ALFALAH" to listOf("BAHL", "BankAlfalah", "Bank Alfalah", "Alfalah"),
+        "RAAST"        to listOf("Raast", "RAAST", "1Bill"),
+        "FAYSAL_BANK"  to listOf("Faysal", "FABL", "Faysal Bank"),
+        "MANUAL_BANK"  to listOf() // Manual bank transfer — no SMS verification
+    )
+
     private val labeledTidRegex = Regex(
         """(?:T-?ID|Txn\s?ID|Trx\s?No|Reference)[:\s#]*([A-Za-z0-9]+)""",
         RegexOption.IGNORE_CASE
@@ -26,8 +38,44 @@ class PaymentSmsReceiver : BroadcastReceiver() {
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         for (msg in messages) {
             val body = msg.messageBody ?: continue
+            val sender = msg.originatingAddress ?: ""
+
+            // Security Check: Sender Number Verify
+            if (!isVerifiedSender(sender)) {
+                Log.w("PaymentSmsReceiver",
+                    "FAKE/UNVERIFIED SMS ignored from: $sender")
+                return
+            }
+
+            Log.d("PaymentSmsReceiver", "Verified sender: $sender")
             processSms(context, body)
         }
+    }
+
+    // Sender Number Check Karo
+    private fun isVerifiedSender(sender: String): Boolean {
+        for ((_, senderList) in verifiedSenders) {
+            for (validSender in senderList) {
+                if (sender.contains(validSender, ignoreCase = true)) {
+                    return true
+                }
+            }
+        }
+        // Agar Sender List Mein Nahi → Reject
+        Log.w("PaymentSmsReceiver", "Unknown sender rejected: $sender")
+        return false
+    }
+
+    // Sender Se ISP Detect Karo
+    private fun detectIspFromSender(sender: String): String {
+        for ((isp, senderList) in verifiedSenders) {
+            for (validSender in senderList) {
+                if (sender.contains(validSender, ignoreCase = true)) {
+                    return isp
+                }
+            }
+        }
+        return "UNKNOWN"
     }
 
     private fun matchWindowStartMillis(context: Context): Long {
@@ -37,7 +85,6 @@ class PaymentSmsReceiver : BroadcastReceiver() {
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
-        // Go back (days-1) days — days=1 means today only
         cal.add(Calendar.DAY_OF_YEAR, -(days - 1))
         return cal.timeInMillis
     }
@@ -66,7 +113,7 @@ class PaymentSmsReceiver : BroadcastReceiver() {
             .collection("transactions")
             .whereEqualTo("bankTransactionId", tid)
             .whereEqualTo("status", "PENDING")
-            .whereGreaterThanOrEqualTo("createdAt", matchWindowStartMillis(context)) // Sirf Aaj Ki
+            .whereGreaterThanOrEqualTo("createdAt", matchWindowStartMillis(context))
             .get()
             .addOnSuccessListener { snapshot ->
                 val match = snapshot.documents.firstOrNull()
@@ -88,13 +135,12 @@ class PaymentSmsReceiver : BroadcastReceiver() {
     private fun checkAmountTimeNameFallback(context: Context, smsBody: String) {
         val amount = extractAmount(smsBody) ?: return
         val now = System.currentTimeMillis()
-        val windowStart = matchWindowStartMillis(context)
 
         FirebaseFirestore.getInstance()
             .collection("transactions")
             .whereEqualTo("status", "PENDING")
             .whereEqualTo("amount", amount)
-            .whereGreaterThanOrEqualTo("createdAt", matchWindowStartMillis(context)) // Sirf Aaj Ki
+            .whereGreaterThanOrEqualTo("createdAt", matchWindowStartMillis(context))
             .get()
             .addOnSuccessListener { snapshot ->
                 for (doc in snapshot.documents) {
