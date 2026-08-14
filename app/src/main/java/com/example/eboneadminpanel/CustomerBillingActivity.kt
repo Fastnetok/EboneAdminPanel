@@ -210,7 +210,6 @@ class CustomerBillingActivity : AppCompatActivity() {
                 binding.tvPackagesToday.text = verified.toString()
                 binding.tvVerifiedToday.text = verified.toString()
                 binding.tvFailedToday.text = failed.toString()
-                binding.tvEarningsToday.text = "Rs %,.0f".format(earnings)
             }
     }
 
@@ -223,25 +222,28 @@ class CustomerBillingActivity : AppCompatActivity() {
 
                 var active = 0; var disabled = 0
                 val speedCounts = mutableMapOf<String, Int>()
+                // FIX: was keyed off "only registered/paid today" — with
+                // no new customer today it always showed 0/0 for every
+                // network. A "network breakdown" card should mean "how
+                // is our whole customer base split across networks",
+                // not "who paid in the last 24 hours" — so this now
+                // counts EVERY customer document, same as the Speed
+                // breakdown below already did.
                 val networkCounts = mutableMapOf<String, Pair<Int, Double>>()
-                val nowCal = startOfTodayMillis()
 
                 for (doc in snapshot.documents) {
                     val packageId = doc.getString("packageId") ?: "Unknown"
                     val packagePrice = doc.getDouble("packagePrice") ?: 0.0
                     val ispProvider = doc.getString("ispProvider") ?: "EBONE"
-                    val lastPaymentDate = doc.getLong("lastPaymentDate")
                     val isActive = isCustomerActive(doc)
                     if (isActive) active++ else disabled++
 
-                    // Speed breakdown: ALL customers (not just today)
+                    // Speed breakdown: ALL customers
                     speedCounts[packageId] = (speedCounts[packageId] ?: 0) + 1
 
-                    // Network breakdown: only today's payments
-                    if (lastPaymentDate != null && lastPaymentDate >= nowCal) {
-                        val current = networkCounts[ispProvider] ?: (0 to 0.0)
-                        networkCounts[ispProvider] = (current.first + 1) to (current.second + packagePrice)
-                    }
+                    // Network breakdown: ALL customers (package count + total package value per ISP)
+                    val current = networkCounts[ispProvider] ?: (0 to 0.0)
+                    networkCounts[ispProvider] = (current.first + 1) to (current.second + packagePrice)
                 }
 
                 binding.tvTotalAccounts.text = (active + disabled).toString()
@@ -280,11 +282,11 @@ class CustomerBillingActivity : AppCompatActivity() {
     private fun renderNetworkBreakdown(networkCounts: Map<String, Pair<Int, Double>>) {
         binding.networkBreakdownContainer.removeAllViews()
         listOf("EBONE", "WATEEN", "ZONG").forEach { isp ->
-            val (count, earnings) = networkCounts[isp] ?: (0 to 0.0)
+            val (count, totalValue) = networkCounts[isp] ?: (0 to 0.0)
             val row = ItemNetworkRowBinding.inflate(LayoutInflater.from(this), binding.networkBreakdownContainer, false)
             row.tvNetworkName.text = isp.lowercase().replaceFirstChar { it.uppercase() }
             row.tvNetworkPackages.text = "$count packages"
-            row.tvNetworkEarnings.text = "Rs %,.0f".format(earnings)
+            row.tvNetworkEarnings.text = "Rs %,.0f".format(totalValue)
             binding.networkBreakdownContainer.addView(row.root)
         }
     }

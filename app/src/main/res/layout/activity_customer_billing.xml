@@ -13,7 +13,7 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingHorizontal="16dp"
-        android:paddingTop="64dp"
+        android:paddingTop="52dp"
         android:paddingBottom="16dp">
 
         <ImageButton
@@ -66,7 +66,7 @@
                     android:orientation="vertical"
                     android:padding="14dp">
                     <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_package" />
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/label_packages_today" android:textColor="#5F5E5A" android:textSize="12sp" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Packages Activated" android:textColor="#5F5E5A" android:textSize="12sp" />
                     <TextView android:id="@+id/tvPackagesToday" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textSize="22sp" android:textStyle="bold" tools:text="37" />
                 </LinearLayout>
 
@@ -79,8 +79,29 @@
                     android:orientation="vertical"
                     android:padding="14dp">
                     <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_cash" />
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/label_earnings_today" android:textColor="#5F5E5A" android:textSize="12sp" />
-                    <TextView android:id="@+id/tvEarningsToday" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textSize="22sp" android:textStyle="bold" tools:text="Rs 62,300" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Unpaid Today"
+                        android:textColor="#5F5E5A"
+                        android:textSize="12sp" />
+                    <TextView
+                        android:id="@+id/tvUnpaidToday"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textSize="22sp"
+                        android:textStyle="bold"
+                        tools:text="Rs 0" />
+                    <TextView
+                        android:id="@+id/tvUnpaidPackagesToday"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="Packages Activated: 0"
+                        android:textColor="#6B7280"
+                        android:textSize="10sp" />
                 </LinearLayout>
             </LinearLayout>
 
@@ -110,9 +131,7 @@
                     android:layout_marginStart="6dp"
                     android:background="@drawable/bg_stat_danger"
                     android:orientation="vertical"
-                    android:padding="14dp"
-                    android:clickable="true"
-                    android:focusable="true">
+                    android:padding="14dp">
                     <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_alert_triangle" />
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/label_failed_entries" android:textColor="@color/status_error_text" android:textSize="12sp" />
                     <TextView android:id="@+id/tvFailedToday" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="@color/status_error_text" android:textSize="22sp" android:textStyle="bold" tools:text="4" />
@@ -187,7 +206,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/title_network_breakdown"
+                    android:text="Activation by Network"
                     android:textStyle="bold"
                     android:textSize="15sp" />
 
@@ -199,7 +218,6 @@
                     android:orientation="vertical" />
             </LinearLayout>
 
-            <!-- Accounts Overview — 3 tappable cards -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -214,9 +232,7 @@
                     android:layout_marginEnd="4dp"
                     android:background="@drawable/bg_stat_card"
                     android:orientation="vertical"
-                    android:padding="12dp"
-                    android:clickable="true"
-                    android:focusable="true">
+                    android:padding="12dp">
                     <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_users" />
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="@string/label_total_accounts" android:textColor="#5F5E5A" android:textSize="10sp" />
                     <TextView android:id="@+id/tvTotalAccounts" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" tools:text="412" />
@@ -230,9 +246,7 @@
                     android:layout_marginHorizontal="4dp"
                     android:background="@drawable/bg_stat_card"
                     android:orientation="vertical"
-                    android:padding="12dp"
-                    android:clickable="true"
-                    android:focusable="true">
+                    android:padding="12dp">
                     <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_plug" />
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="@string/label_active_accounts" android:textColor="#5F5E5A" android:textSize="10sp" />
                     <TextView android:id="@+id/tvActiveAccounts" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" tools:text="378" />
@@ -246,9 +260,7 @@
                     android:layout_marginStart="4dp"
                     android:background="@drawable/bg_stat_card"
                     android:orientation="vertical"
-                    android:padding="12dp"
-                    android:clickable="true"
-                    android:focusable="true">
+                    android:padding="12dp">
                     <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_plug_off" />
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="@string/label_disabled_accounts" android:textColor="#5F5E5A" android:textSize="10sp" />
                     <TextView android:id="@+id/tvDisabledAccounts" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" tools:text="34" />

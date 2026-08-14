@@ -89,7 +89,26 @@ class AddCustomerActivity : AppCompatActivity() {
                 }
 
                 val billingCycleDays = 30
-                var lastPaymentDate: Long? = null
+
+                // FIX: previously, lastPaymentDate stayed `null` for any
+                // BRAND NEW customer (the "Existing Customer" switch was
+                // OFF). That silently broke two things downstream:
+                //   1. isCustomerActive() requires a non-null
+                //      lastPaymentDate, so new customers showed as
+                //      "Disabled" forever until their first renewal.
+                //   2. CustomerBillingActivity's network/earnings
+                //      breakdown only counts customers whose
+                //      lastPaymentDate falls within a given window, so a
+                //      customer with lastPaymentDate = null was NEVER
+                //      counted in EBONE/WATEEN/ZONG totals or Rs earnings
+                //      — even though a real payment/package was recorded
+                //      right here at registration.
+                // Fix: a brand-new customer's package registration IS
+                // their first payment, so lastPaymentDate defaults to
+                // right now (unless the "Existing Customer" switch says
+                // otherwise, in which case we back-calculate from the
+                // days-remaining they entered, same as before).
+                var lastPaymentDate: Long = System.currentTimeMillis()
                 if (binding.switchExistingCustomer.isChecked) {
                     val daysRemaining =
                         binding.etDaysRemaining.text.toString().trim().toIntOrNull()
