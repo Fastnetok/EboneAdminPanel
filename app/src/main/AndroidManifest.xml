@@ -96,6 +96,8 @@
         <activity android:name=".SalaryHistoryActivity" android:exported="false" />
         <activity android:name=".AllSalaryTotalActivity" android:exported="false" />
         <activity android:name=".OfficeTimmingsActivity" android:exported="false" />
+        <activity android:name=".NetworkPackagesActivity" android:exported="false" />
+        <activity android:name=".PaymentSyncSettingsActivity" android:exported="false" />
 
 
         <!-- SMS Receiver -->

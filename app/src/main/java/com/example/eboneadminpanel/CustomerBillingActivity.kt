@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -39,6 +40,15 @@ class CustomerBillingActivity : AppCompatActivity() {
     private val failedDocs = mutableListOf<DocumentSnapshot>()
     private val allCustomerDocs = mutableListOf<DocumentSnapshot>()
 
+    // customerId -> ispProvider, kept fresh by startAccountsOverviewListener.
+    // Used to attribute TODAY's verified payments to a network, since the
+    // transactions collection itself doesn't store ispProvider directly.
+    private val customerIspMap = mutableMapOf<String, String>()
+
+    // Today's VERIFIED transactions only: customerId -> amount. Rebuilt by
+    // startTodaysTransactionStatsListener on every snapshot.
+    private val todaysVerifiedTxns = mutableListOf<Pair<String, Double>>()
+
     private val companies = listOf("EBONE", "WATEEN", "ZONG")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +62,9 @@ class CustomerBillingActivity : AppCompatActivity() {
         startAccountsOverviewListener()
         startRecentTransactionsListener()
 
-        binding.btnMenu.setOnClickListener { finish() }
+        binding.btnMenu.setOnClickListener {
+            startActivity(Intent(this, PaymentSyncSettingsActivity::class.java))
+        }
         binding.btnViewAllTransactions.setOnClickListener { }
 
         // Failed entries card
@@ -126,15 +138,40 @@ class CustomerBillingActivity : AppCompatActivity() {
                 textSize = 12f
                 setTextColor(Color.parseColor("#757575"))
             }
+            val btnRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.topMargin = 10 }
+            }
+
+            if (status == "PENDING") {
+                val retryBtn = Button(this).apply {
+                    text = "Retry Now"
+                    setBackgroundColor(Color.parseColor("#1565C0"))
+                    setTextColor(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).also { it.marginEnd = 8 }
+                }
+                retryBtn.setOnClickListener {
+                    retryBtn.isEnabled = false
+                    retryBtn.text = "Checking..."
+                    Thread {
+                        val matched = PaymentSmsScanner.scanAllPending(this)
+                        runOnUiThread {
+                            Toast.makeText(this,
+                                if (matched > 0) "✅ Matched and activated!" else "Still no match in SMS inbox",
+                                Toast.LENGTH_SHORT).show()
+                        }
+                    }.start()
+                }
+                btnRow.addView(retryBtn)
+            }
+
             val clearBtn = Button(this).apply {
                 text = "Clear Entry"
                 setBackgroundColor(Color.parseColor("#C62828"))
                 setTextColor(Color.WHITE)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).also { it.topMargin = 10 }
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
+            btnRow.addView(clearBtn)
 
             clearBtn.setOnClickListener {
                 AlertDialog.Builder(this)
@@ -149,7 +186,7 @@ class CustomerBillingActivity : AppCompatActivity() {
 
             card.addView(nameView)
             card.addView(metaView)
-            card.addView(clearBtn)
+            card.addView(btnRow)
             container.addView(card)
         }
 
@@ -187,16 +224,23 @@ class CustomerBillingActivity : AppCompatActivity() {
                 if (snapshot == null) return@addSnapshotListener
                 var verified = 0; var failed = 0; var earnings = 0.0
                 failedDocs.clear()
+                todaysVerifiedTxns.clear()
                 val todayStart = startOfTodayMillis()
                 for (doc in snapshot.documents) {
                     val status = doc.getString("status") ?: ""
                     val amount = doc.getDouble("amount") ?: 0.0
                     val createdAt = doc.getLong("createdAt") ?: 0L
+                    val customerId = doc.getString("customerId") ?: ""
                     when (status) {
                         "VERIFIED" -> {
                             verified++
-                            // Earnings only from today
-                            if (createdAt >= todayStart) earnings += amount
+                            // Earnings + network breakdown only from today
+                            if (createdAt >= todayStart) {
+                                earnings += amount
+                                if (customerId.isNotEmpty()) {
+                                    todaysVerifiedTxns.add(customerId to amount)
+                                }
+                            }
                         }
                         "FAILED", "INSUFFICIENT", "OVERPAID", "PENDING" -> {
                             // Only show today's failed/pending in failed list
@@ -210,6 +254,8 @@ class CustomerBillingActivity : AppCompatActivity() {
                 binding.tvPackagesToday.text = verified.toString()
                 binding.tvVerifiedToday.text = verified.toString()
                 binding.tvFailedToday.text = failed.toString()
+
+                renderTodayNetworkBreakdown()
             }
     }
 
@@ -220,37 +266,31 @@ class CustomerBillingActivity : AppCompatActivity() {
                 allCustomerDocs.clear()
                 allCustomerDocs.addAll(snapshot.documents)
 
+                customerIspMap.clear()
                 var active = 0; var disabled = 0
                 val speedCounts = mutableMapOf<String, Int>()
-                // FIX: was keyed off "only registered/paid today" — with
-                // no new customer today it always showed 0/0 for every
-                // network. A "network breakdown" card should mean "how
-                // is our whole customer base split across networks",
-                // not "who paid in the last 24 hours" — so this now
-                // counts EVERY customer document, same as the Speed
-                // breakdown below already did.
-                val networkCounts = mutableMapOf<String, Pair<Int, Double>>()
 
                 for (doc in snapshot.documents) {
                     val packageId = doc.getString("packageId") ?: "Unknown"
-                    val packagePrice = doc.getDouble("packagePrice") ?: 0.0
                     val ispProvider = doc.getString("ispProvider") ?: "EBONE"
+                    val customerId = doc.getString("customerId") ?: doc.id
                     val isActive = isCustomerActive(doc)
                     if (isActive) active++ else disabled++
 
                     // Speed breakdown: ALL customers
                     speedCounts[packageId] = (speedCounts[packageId] ?: 0) + 1
 
-                    // Network breakdown: ALL customers (package count + total package value per ISP)
-                    val current = networkCounts[ispProvider] ?: (0 to 0.0)
-                    networkCounts[ispProvider] = (current.first + 1) to (current.second + packagePrice)
+                    customerIspMap[customerId] = ispProvider
                 }
 
                 binding.tvTotalAccounts.text = (active + disabled).toString()
                 binding.tvActiveAccounts.text = active.toString()
                 binding.tvDisabledAccounts.text = disabled.toString()
                 renderSpeedBreakdown(speedCounts)
-                renderNetworkBreakdown(networkCounts)
+
+                // Customer→network map just refreshed — recompute today's
+                // network breakdown too, since it depends on this map.
+                renderTodayNetworkBreakdown()
             }
     }
 
@@ -279,16 +319,43 @@ class CustomerBillingActivity : AppCompatActivity() {
         entries.forEachIndexed { i, e -> if (i < labels.size) labels[i].text = "${e.key}: ${e.value}" }
     }
 
-    private fun renderNetworkBreakdown(networkCounts: Map<String, Pair<Int, Double>>) {
+    /**
+     * Renders TODAY's SMS-matched / verified payments grouped by network —
+     * NOT the total registered customer base (that lives in
+     * NetworkPackagesActivity now). Cross-references each verified
+     * transaction's customerId against customerIspMap to find which
+     * network it belongs to.
+     */
+    private fun renderTodayNetworkBreakdown() {
+        val networkCounts = mutableMapOf<String, Pair<Int, Double>>()
+        for ((customerId, amount) in todaysVerifiedTxns) {
+            val isp = customerIspMap[customerId] ?: "EBONE"
+            val current = networkCounts[isp] ?: (0 to 0.0)
+            networkCounts[isp] = (current.first + 1) to (current.second + amount)
+        }
+
         binding.networkBreakdownContainer.removeAllViews()
-        listOf("EBONE", "WATEEN", "ZONG").forEach { isp ->
-            val (count, totalValue) = networkCounts[isp] ?: (0 to 0.0)
+        companies.forEach { isp ->
+            val (count, totalAmount) = networkCounts[isp] ?: (0 to 0.0)
             val row = ItemNetworkRowBinding.inflate(LayoutInflater.from(this), binding.networkBreakdownContainer, false)
             row.tvNetworkName.text = isp.lowercase().replaceFirstChar { it.uppercase() }
-            row.tvNetworkPackages.text = "$count packages"
-            row.tvNetworkEarnings.text = "Rs %,.0f".format(totalValue)
+            row.tvNetworkPackages.text = "$count payments today"
+            row.tvNetworkEarnings.text = "Rs %,.0f".format(totalAmount)
             binding.networkBreakdownContainer.addView(row.root)
         }
+
+        // Link to the full package-distribution screen (all-time, all
+        // registered customers by network).
+        val viewAllRow = TextView(this).apply {
+            text = "View full package distribution by network ›"
+            textSize = 13f
+            setTextColor(Color.parseColor("#1565C0"))
+            setPadding(0, (10 * resources.displayMetrics.density).toInt(), 0, 0)
+            setOnClickListener {
+                startActivity(Intent(this@CustomerBillingActivity, NetworkPackagesActivity::class.java))
+            }
+        }
+        binding.networkBreakdownContainer.addView(viewAllRow)
     }
 
     private fun startRecentTransactionsListener() {
@@ -317,13 +384,13 @@ class CustomerBillingActivity : AppCompatActivity() {
                             row.tvTxnStatus.text = "Waiting for SMS"
                             row.tvTxnStatus.setBackgroundResource(R.drawable.bg_stat_card)
                             row.tvTxnStatus.setTextColor(Color.parseColor("#5F5E5A"))
-                            row.root.setOnClickListener { showClearDialog(doc.id, customerId, source, timeText) }
+                            row.root.setOnClickListener { showClearDialog(doc.id, customerId, source, timeText, status) }
                         }
                         else -> {
                             row.tvTxnStatus.text = getString(R.string.status_mismatch)
                             row.tvTxnStatus.setBackgroundResource(R.drawable.bg_chip_mismatch)
                             row.tvTxnStatus.setTextColor(ContextCompat.getColor(this, R.color.status_error_text))
-                            row.root.setOnClickListener { showClearDialog(doc.id, customerId, source, timeText) }
+                            row.root.setOnClickListener { showClearDialog(doc.id, customerId, source, timeText, status) }
                         }
                     }
                     binding.recentTransactionsContainer.addView(row.root)
@@ -331,15 +398,37 @@ class CustomerBillingActivity : AppCompatActivity() {
             }
     }
 
-    private fun showClearDialog(docId: String, customerId: String, source: String, timeText: String) {
-        AlertDialog.Builder(this)
-            .setTitle("Clear this entry?")
-            .setMessage("Customer: $customerId\nMethod: $source · $timeText\n\nThis will remove the failed entry so the customer can submit their payment again.")
-            .setPositiveButton("Yes, Clear") { _, _ ->
-                db.collection("transactions").document(docId).delete()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+    private fun showClearDialog(docId: String, customerId: String, source: String, timeText: String, status: String) {
+        if (status == "PENDING") {
+            AlertDialog.Builder(this)
+                .setTitle("Payment Waiting for SMS")
+                .setMessage("Customer: $customerId\nMethod: $source · $timeText\n\nThis TID is real but hasn't matched an SMS yet. You can retry checking now, or clear it so the customer can resubmit.")
+                .setPositiveButton("Retry Now") { _, _ ->
+                    Toast.makeText(this, "Checking SMS inbox...", Toast.LENGTH_SHORT).show()
+                    Thread {
+                        val matched = PaymentSmsScanner.scanAllPending(this)
+                        runOnUiThread {
+                            Toast.makeText(this,
+                                if (matched > 0) "✅ Matched and activated!" else "Still no match in SMS inbox",
+                                Toast.LENGTH_SHORT).show()
+                        }
+                    }.start()
+                }
+                .setNeutralButton("Clear Entry") { _, _ ->
+                    db.collection("transactions").document(docId).delete()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("Clear this entry?")
+                .setMessage("Customer: $customerId\nMethod: $source · $timeText\n\nThis will remove the failed entry so the customer can submit their payment again.")
+                .setPositiveButton("Yes, Clear") { _, _ ->
+                    db.collection("transactions").document(docId).delete()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
     }
 
     override fun onDestroy() {
