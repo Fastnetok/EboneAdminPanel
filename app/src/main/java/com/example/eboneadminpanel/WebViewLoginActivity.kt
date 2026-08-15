@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import org.json.JSONObject
 
@@ -34,11 +35,54 @@ class WebViewLoginActivity : AppCompatActivity() {
     private var transactionId: String? = null
     private val db by lazy { FirebaseFirestore.getInstance() }
 
+    // NEW: "SUSPEND" | "ENABLE" | null (null = normal package activation,
+    // the original SMS/manual-recharge flow this activity already did).
+    // Passed in via intent extra "manual_action".
+    private var manualAction: String? = null
+
+    companion object {
+        // Ebone: suspending/enabling a customer = changing their partner.ebill.pk
+        // password to one of these two fixed values (confirmed by admin).
+        private const val EBONE_SUSPEND_PASSWORD = "8888"
+        private const val EBONE_ENABLE_PASSWORD = "1001"
+    }
+
     private val PREFS_NAME = "ebill_accounts"
     private val KEY_ACCOUNTS = "accounts_json"
     private val KEY_ACTIVE = "active_account"
     private val WATEEN_PREFS = "wateen_accounts"
     private val ZONG_PREFS = "zong_accounts"
+
+    // NEW: session cache specifically for ISP Panel Settings logins.
+    // These credentials never had cookie reuse before — every complaint
+    // creation re-ran the FULL login form fill, even when a still-valid
+    // session existed. This cache fixes that: reuse the cookie until the
+    // panel itself tells us the session expired (redirects to its login
+    // page), at which point handlePageLoaded() already calls
+    // tryAutoLogin() automatically.
+    private val ISP_SESSION_PREFS = "isp_session_cookies"
+
+    private fun getIspSessionCookie(isp: String): String {
+        return securePrefs(ISP_SESSION_PREFS).getString(isp, "") ?: ""
+    }
+
+    private fun saveIspSessionCookie(isp: String, cookie: String) {
+        securePrefs(ISP_SESSION_PREFS).edit().putString(isp, cookie).apply()
+    }
+
+    /** Called right after a successful login — if this login used ISP
+     * Panel Settings credentials (not the old manual account store),
+     * cache the resulting cookie so the NEXT complaint reuses the
+     * session instead of logging in again. */
+    private fun cacheIspSessionCookieIfApplicable(isp: String, domain: String) {
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, isp)
+        if (!ispUsername.isNullOrEmpty()) {
+            val cookie = CookieManager.getInstance().getCookie(domain)
+            if (!cookie.isNullOrEmpty()) {
+                saveIspSessionCookie(isp, cookie)
+            }
+        }
+    }
 
     override fun onResume() {
         super.onResume()
@@ -90,6 +134,7 @@ class WebViewLoginActivity : AppCompatActivity() {
         selectedIsp = intent.getStringExtra("selected_isp") ?: "EBONE"
         autoActivateCustomerId = intent.getStringExtra("auto_activate_customer_id")
         transactionId = intent.getStringExtra("transaction_id")
+        manualAction = intent.getStringExtra("manual_action") // "SUSPEND" | "ENABLE" | null
 
         webView = findViewById(R.id.loginWebView)
 
@@ -188,6 +233,25 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
+        // PRIMARY: ISP Panel Settings credentials — reuse the saved
+        // session cookie if we have one, instead of always re-logging in.
+        // If the cookie has expired, the panel will redirect to its own
+        // login page and handlePageLoaded() detects that and calls
+        // tryAutoLogin() automatically — so this is always safe.
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp)
+        if (!ispUsername.isNullOrEmpty()) {
+            val savedCookie = getIspSessionCookie(selectedIsp)
+            if (savedCookie.isNotEmpty()) {
+                CookieManager.getInstance().setCookie(domainFor(selectedIsp), savedCookie)
+                CookieManager.getInstance().flush()
+                webView.loadUrl(clientsUrlFor(selectedIsp))
+            } else {
+                webView.loadUrl(loginUrlFor(selectedIsp))
+            }
+            return
+        }
+
+        // FALLBACK: old per-ISP manual account store
         val accounts = loadAccounts()
         val active = securePrefs(getPrefsName()).getString(KEY_ACTIVE, "") ?: ""
         if (active.isNotEmpty() && accounts.has(active)) {
@@ -322,6 +386,10 @@ class WebViewLoginActivity : AppCompatActivity() {
             selectedIsp == "ZONG" && url.contains("login.php") -> {
                 loginDone = false; tryAutoLogin()
             }
+            // NEW: Ebone suspend/enable — password-change page loaded
+            selectedIsp == "EBONE" && url.contains("/clients/clientChange/") && manualAction != null -> {
+                fillEbonePasswordAndSubmit()
+            }
             selectedIsp == "EBONE" && url.contains("/clients/clientStats/") -> {
                 clickEboneSubmitButton()
             }
@@ -359,9 +427,11 @@ class WebViewLoginActivity : AppCompatActivity() {
                 fetchZongCustomerDetails()
             }
             selectedIsp == "EBONE" && url.contains("partner.ebill.pk") &&
-                    !url.contains("/clients/client/") && !url.contains("/clients/clientStats/") -> {
+                    !url.contains("/clients/client/") && !url.contains("/clients/clientStats/") &&
+                    !url.contains("/clients/clientChange/") -> {
                 loginDone = true
                 saveCookieForCurrentAccount("https://partner.ebill.pk")
+                cacheIspSessionCookieIfApplicable("EBONE", "https://partner.ebill.pk")
                 android.widget.Toast.makeText(this, "Ebone: Logged in — URL: $url", android.widget.Toast.LENGTH_LONG).show()
                 webView.evaluateJavascript(
                     "document.querySelectorAll('.modal,.modal-backdrop,.popup').forEach(function(el){el.style.display='none';});document.body.classList.remove('modal-open');", null
@@ -376,6 +446,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     !url.contains("auth.html") && !url.contains("/user/user/view/") -> {
                 loginDone = true
                 saveCookieForCurrentAccount("https://panel.wateen.com")
+                cacheIspSessionCookieIfApplicable("WATEEN", "https://panel.wateen.com")
                 if (!url.contains("/user/user/all")) {
                     webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/user/user/all") }, 800)
                 } else {
@@ -385,7 +456,10 @@ class WebViewLoginActivity : AppCompatActivity() {
             selectedIsp == "ZONG" && url.contains("turbonet.zong.com.pk") &&
                     !url.contains("login.php") && !url.contains("customer_portal.php") -> {
                 loginDone = true
-                if (!zongDealerMode) saveCookieForCurrentAccount("https://turbonet.zong.com.pk")
+                if (!zongDealerMode) {
+                    saveCookieForCurrentAccount("https://turbonet.zong.com.pk")
+                    cacheIspSessionCookieIfApplicable("ZONG", "https://turbonet.zong.com.pk")
+                }
                 if (!url.contains("customers.php")) {
                     webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/customers.php") }, 800)
                 } else {
@@ -457,6 +531,110 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
+    // ===================== NEW: MANUAL SUSPEND / ENABLE =====================
+
+    /**
+     * Called once the SUSPEND/ENABLE action has actually gone through on
+     * the ISP panel side (Ebone password changed, or Wateen/Zong
+     * disable/enable link hit). Updates Firestore, tells the calling
+     * screen it worked, and closes the WebView.
+     */
+    private fun finishManualActionSuccess() {
+        val custId = autoActivateCustomerId
+        if (custId != null) {
+            val newStatus = if (manualAction == "SUSPEND") "DISABLED" else "ACTIVE"
+            val updates = mutableMapOf<String, Any>("activationStatus" to newStatus)
+            if (manualAction == "ENABLE") {
+                // Re-enabling clears any pending grace deadline and resets
+                // the billing cycle from right now.
+                updates["lastPaymentDate"] = System.currentTimeMillis()
+                updates["graceDeadline"] = FieldValue.delete()
+            }
+            db.collection("customers").document(custId).update(updates)
+        }
+        Toast.makeText(
+            this,
+            if (manualAction == "SUSPEND") "Customer suspended" else "Customer re-enabled",
+            Toast.LENGTH_LONG
+        ).show()
+        setResult(RESULT_OK, Intent().apply { putExtra("manual_action_success", true) })
+        finish()
+    }
+
+    private fun finishManualActionFailure(reason: String) {
+        Toast.makeText(this, "Could not complete: $reason", Toast.LENGTH_LONG).show()
+        setResult(RESULT_OK, Intent().apply { putExtra("manual_action_success", false) })
+        finish()
+    }
+
+    /** Ebone: fills the new-password field on /clients/clientChange/{id}
+     * with the fixed suspend/enable code and submits. */
+    private fun fillEbonePasswordAndSubmit() {
+        val newPassword = if (manualAction == "SUSPEND") EBONE_SUSPEND_PASSWORD else EBONE_ENABLE_PASSWORD
+        // Disable Chrome/WebView autofill on this page specifically — a
+        // previously-saved password autofilling into the field AFTER our
+        // script runs is the most likely reason the value doesn't stick.
+        webView.settings.saveFormData = false
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var inputs = document.querySelectorAll('input[type=password]');" +
+                        "  var filled = 0;" +
+                        "  for (var i=0;i<inputs.length;i++){" +
+                        "    inputs[i].removeAttribute('autocomplete');" +
+                        "    inputs[i].setAttribute('autocomplete','off');" +
+                        "    inputs[i].value = '$newPassword';" +
+                        "    inputs[i].setAttribute('value','$newPassword');" +
+                        "    inputs[i].dispatchEvent(new Event('input',{bubbles:true}));" +
+                        "    inputs[i].dispatchEvent(new Event('change',{bubbles:true}));" +
+                        "    inputs[i].dispatchEvent(new Event('blur',{bubbles:true}));" +
+                        "    filled++;" +
+                        "  }" +
+                        "  return filled + '';" +
+                        "})()"
+            ) { filledCountRaw ->
+                val filledCount = filledCountRaw.trim().removeSurrounding("\"").toIntOrNull() ?: 0
+                if (filledCount == 0) {
+                    finishManualActionFailure("Password field not found on Ebone page")
+                    return@evaluateJavascript
+                }
+                // Small delay so the site's own JS (validation, autofill
+                // re-check) settles before we click submit, then re-verify
+                // the field still holds our value right before clicking.
+                webView.postDelayed({
+                    webView.evaluateJavascript(
+                        "(function(){" +
+                                "  var inputs = document.querySelectorAll('input[type=password]');" +
+                                "  for (var i=0;i<inputs.length;i++){" +
+                                "    if (inputs[i].value !== '$newPassword'){" +
+                                "      inputs[i].value = '$newPassword';" +
+                                "      inputs[i].dispatchEvent(new Event('input',{bubbles:true}));" +
+                                "    }" +
+                                "  }" +
+                                // Submit the FORM directly instead of clicking
+                                // the button — form.submit() bypasses any
+                                // client-side JS validation (e.g. a blocked
+                                // click handler checking a confirm-password
+                                // field), unlike button.click() which respects it.
+                                "  var form = document.querySelector('form[action*=\"clientChange\"]') || document.querySelector('form');" +
+                                "  if(form){ form.submit(); return 'submitted'; }" +
+                                "  var b = document.querySelector('button[type=submit]');" +
+                                "  if(b){ b.click(); return 'submitted-via-click'; }" +
+                                "  return 'not found';" +
+                                "})()"
+                    ) { result ->
+                        val clean = result.trim().removeSurrounding("\"")
+                        if (clean == "submitted" || clean == "submitted-via-click") {
+                            webView.postDelayed({ finishManualActionSuccess() }, 2000)
+                        } else {
+                            finishManualActionFailure("Submit button not found on Ebone page")
+                        }
+                    }
+                }, 800)
+            }
+        }, 1200)
+    }
+
     // ===================== WATEEN =====================
 
     private fun searchWateenCustomer(customerId: String) {
@@ -492,6 +670,32 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun onWateenProfileOpened() {
+        // NEW: manual SUSPEND/ENABLE — find the "Disable Net"/"Enable Net"
+        // link on the profile and navigate straight to its href. The
+        // jconfirm popup is a client-side UI safety layer on the anchor's
+        // click handler only — the href itself is the real action URL, so
+        // loading it directly performs the disable/enable with no popup.
+        if (manualAction != null) {
+            val selector = if (manualAction == "SUSPEND")
+                "a.disable-user-connection" else "a.enable-user-connection"
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var link = document.querySelector('$selector');" +
+                        "  if(link){ return link.href; }" +
+                        "  return '';" +
+                        "})()"
+            ) { hrefRaw ->
+                val href = hrefRaw.trim().removeSurrounding("\"")
+                if (href.isNotEmpty() && href.startsWith("http")) {
+                    webView.postDelayed({ webView.loadUrl(href) }, 300)
+                    webView.postDelayed({ finishManualActionSuccess() }, 2500)
+                } else {
+                    finishManualActionFailure("Disable/Enable link not found on Wateen profile")
+                }
+            }
+            return
+        }
+
         webView.evaluateJavascript(
             "(function(){" +
                     "  var spans = document.querySelectorAll('span.btn-warning');" +
@@ -546,6 +750,12 @@ class WebViewLoginActivity : AppCompatActivity() {
     // ===================== EBONE =====================
 
     private fun searchEboneCustomer(customerId: String) {
+        // NEW: manual SUSPEND/ENABLE — skip straight to the password-change
+        // page instead of the normal client profile / renew flow.
+        if (manualAction != null) {
+            webView.loadUrl("https://partner.ebill.pk/clients/clientChange/$customerId")
+            return
+        }
         // Direct URL — fastest and most reliable approach.
         // If "not found" is returned, it means the customer ID
         // is wrong/mistyped in Firestore (or doesn't exist in panel).
@@ -711,9 +921,42 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    // ===================== ZONG: DEALER PANEL - ACTIVATE =====================
+    // ===================== ZONG: DEALER PANEL - ACTIVATE / SUSPEND / ENABLE =====================
 
     private fun onZongProfileOpened() {
+        // NEW: manual SUSPEND/ENABLE — find the actionx=Disable/Enable
+        // link that's currently visible on the profile (only one of the
+        // two is shown at a time, depending on current status) and
+        // navigate to it directly. The token in the URL is generated
+        // fresh per page load, so it must be read live — never hardcoded.
+        if (manualAction != null) {
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var links = document.querySelectorAll('a[href*=\"actionx=\"]');" +
+                        "  for (var i=0;i<links.length;i++){" +
+                        "    if (links[i].href.indexOf('actionx=Disable') > -1 || links[i].href.indexOf('actionx=Enable') > -1){" +
+                        "      return links[i].href;" +
+                        "    }" +
+                        "  }" +
+                        "  return '';" +
+                        "})()"
+            ) { hrefRaw ->
+                val href = hrefRaw.trim().removeSurrounding("\"")
+                if (href.isNotEmpty() && href.startsWith("http")) {
+                    // Whatever the link currently says (Disable or Enable)
+                    // reflects the customer's CURRENT state and toggles it —
+                    // matches what we asked for either way, since a
+                    // suspended customer only shows an Enable link and
+                    // vice versa.
+                    webView.postDelayed({ webView.loadUrl(href) }, 300)
+                    webView.postDelayed({ finishManualActionSuccess() }, 2500)
+                } else {
+                    finishManualActionFailure("Disable/Enable link not found on Zong profile")
+                }
+            }
+            return
+        }
+
         if (autoActivateCustomerId != null) {
             webView.evaluateJavascript(
                 "(function(){" +
@@ -765,22 +1008,74 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun fetchZongCustomerDetails() {
+    private var zongDetailsFetchDone = false
+
+    private fun fetchZongCustomerDetails(attempt: Int = 1) {
+        if (zongDetailsFetchDone) return
         val script = """
             (function(){
-                var expiry = '';
+                var userId = '', address = '', phone = '', expiry = '';
+                var tables = document.querySelectorAll('table.skills');
+                for (var t=0; t<tables.length; t++){
+                    var rows = tables[t].querySelectorAll('tbody tr');
+                    var hasFullName = false;
+                    for (var i=0; i<rows.length; i++){
+                        var chk = rows[i].querySelector('td.item');
+                        if (chk && chk.textContent.trim() === 'Full Name') { hasFullName = true; break; }
+                    }
+                    if (!hasFullName) continue;
+                    for (var i=0; i<rows.length; i++){
+                        var itemTd = rows[i].querySelector('td.item');
+                        if (!itemTd) continue;
+                        var label = itemTd.textContent.trim();
+                        var cells = rows[i].querySelectorAll('td');
+                        var valueTd = cells[cells.length - 1];
+                        var value = valueTd ? valueTd.textContent.trim() : '';
+                        if (label === 'PPPoE Auth User') { userId = value; }
+                        else if (label === 'Address') { address = value; }
+                        else if (label === 'Mobile') { phone = value; }
+                    }
+                    break;
+                }
                 var tiles = document.querySelectorAll('.col-md-4');
-                for (var i=0; i<tiles.length; i++){
-                    var title = tiles[i].querySelector('.title');
+                for (var j=0; j<tiles.length; j++){
+                    var title = tiles[j].querySelector('.title');
                     if (title && title.innerText.indexOf('Expiration') > -1){
-                        var val = tiles[i].querySelector('.counter');
+                        var val = tiles[j].querySelector('.counter');
                         if (val) expiry = (val.textContent || '').trim();
                     }
                 }
-                return JSON.stringify({userId:'', address:'', phone:'', expiry:expiry});
+                return JSON.stringify({userId:userId, address:address, phone:phone, expiry:expiry});
             })()
         """.trimIndent()
-        webView.evaluateJavascript(script) { result -> handleFetchResult(result) }
+        webView.evaluateJavascript(script) { result ->
+            try {
+                val clean = result.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\")
+                val userId = Regex("\"userId\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                val address = Regex("\"address\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                val phone = normalizePakPhone(Regex("\"phone\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: "")
+
+                // The Bio-Data table (Address/Mobile) can render slightly
+                // after the initial page paint (User ID area loads first).
+                // Retry a few times before settling for whatever we have,
+                // instead of finishing early with incomplete data.
+                val incomplete = address.isEmpty() || phone.isEmpty()
+                if (incomplete && attempt < 4) {
+                    webView.postDelayed({ fetchZongCustomerDetails(attempt + 1) }, 1200)
+                    return@evaluateJavascript
+                }
+
+                if (!zongDetailsFetchDone && (userId.isNotEmpty() || address.isNotEmpty() || phone.isNotEmpty())) {
+                    zongDetailsFetchDone = true
+                    setResult(RESULT_OK, Intent().apply {
+                        putExtra("fetched_user_id", userId)
+                        putExtra("fetched_address", address)
+                        putExtra("fetched_phone", phone)
+                    })
+                    finish()
+                }
+            } catch (e: Exception) {}
+        }
     }
 
     private fun fetchEboneCustomerDetails() {
@@ -838,12 +1133,22 @@ class WebViewLoginActivity : AppCompatActivity() {
         webView.evaluateJavascript(script) { result -> handleFetchResult(result) }
     }
 
+    /** Converts "+923034507600" → "03034507600" (Pakistan local format). */
+    private fun normalizePakPhone(raw: String): String {
+        var p = raw.trim().replace(" ", "").replace("-", "")
+        return when {
+            p.startsWith("+92") -> "0" + p.substring(3)
+            p.startsWith("92") && p.length > 10 -> "0" + p.substring(2)
+            else -> p
+        }
+    }
+
     private fun handleFetchResult(result: String) {
         try {
             val clean = result.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\")
             val userId = Regex("\"userId\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
             val address = Regex("\"address\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
-            val phone = Regex("\"phone\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+            val phone = normalizePakPhone(Regex("\"phone\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: "")
             if (userId.isNotEmpty() || address.isNotEmpty() || phone.isNotEmpty()) {
                 setResult(RESULT_OK, Intent().apply {
                     putExtra("fetched_user_id", userId)

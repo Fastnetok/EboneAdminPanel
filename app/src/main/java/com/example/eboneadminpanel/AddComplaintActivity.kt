@@ -32,15 +32,22 @@ class AddComplaintActivity : AppCompatActivity() {
         val assignButton = findViewById<Button>(R.id.assignComplaintButton)
 
         loginButton.setOnClickListener {
+            // Added ZONG — previously only Ebone and Wateen were selectable
+            // here, even though ZONG panel automation already exists.
             val ispList = arrayOf(
                 "Ebone (ebill.pk)",
-                "Wateen (wateen.com)"
+                "Wateen (wateen.com)",
+                "Zong (turbonet.zong.com.pk)"
             )
 
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Select ISP")
                 .setItems(ispList) { _, which ->
-                    val selectedISP = if (which == 0) "EBONE" else "WATEEN"
+                    val selectedISP = when (which) {
+                        0 -> "EBONE"
+                        1 -> "WATEEN"
+                        else -> "ZONG"
+                    }
                     val intent = Intent(this, WebViewLoginActivity::class.java)
                     intent.putExtra("selected_isp", selectedISP)
                     webViewLauncher.launch(intent)

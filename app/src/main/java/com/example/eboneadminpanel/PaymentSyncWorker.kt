@@ -35,8 +35,11 @@ class PaymentSyncWorker(context: Context, params: WorkerParameters) :
 
     companion object {
         private const val WORK_NAME = "payment_auto_sync_work"
+        private const val GRACE_WORK_NAME = "grace_deadline_check_work"
 
-        /** Schedules (or reschedules) the periodic sync at the given interval. */
+        /** Schedules (or reschedules) both the payment sync AND the grace
+         * deadline check at the given interval — they run together since
+         * both are lightweight read-only checks against Firestore. */
         fun schedule(context: Context, intervalMinutes: Long) {
             val safeInterval = intervalMinutes.coerceAtLeast(15) // WorkManager minimum
             val request = PeriodicWorkRequestBuilder<PaymentSyncWorker>(
@@ -47,11 +50,21 @@ class PaymentSyncWorker(context: Context, params: WorkerParameters) :
                 ExistingPeriodicWorkPolicy.UPDATE,
                 request
             )
+
+            val graceRequest = PeriodicWorkRequestBuilder<GraceDeadlineWorker>(
+                safeInterval, TimeUnit.MINUTES
+            ).build()
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                GRACE_WORK_NAME,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                graceRequest
+            )
         }
 
-        /** Turns auto-sync off. */
+        /** Turns auto-sync off (both payment sync and grace check). */
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+            WorkManager.getInstance(context).cancelUniqueWork(GRACE_WORK_NAME)
         }
     }
 }

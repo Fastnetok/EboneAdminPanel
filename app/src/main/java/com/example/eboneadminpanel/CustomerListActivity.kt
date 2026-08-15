@@ -1,5 +1,6 @@
 package com.example.eboneadminpanel
 
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -36,6 +37,16 @@ class CustomerListActivity : AppCompatActivity() {
 
     private var currentDocs = emptyList<DocumentSnapshot>()
     private var searchText = ""
+
+    // NEW: tracks which customer/grace-days a "Manual Recharge" WebView
+    // launch was for, so onActivityResult knows what to save once the
+    // portal activation actually succeeds.
+    private var pendingGraceCustomerId: String? = null
+    private var pendingGraceDays: Int = 0
+
+    companion object {
+        private const val REQUEST_MANUAL_RECHARGE = 5001
+    }
 
     // ============================================================
     // FIX #1 (wrong suggestions): AutoCompleteTextView normally
@@ -366,6 +377,120 @@ class CustomerListActivity : AppCompatActivity() {
                 lastPayment + (days * 86400000L)
     }
 
+    // ===================== NEW: MANUAL RECHARGE / SUSPEND / ENABLE =====================
+
+    /**
+     * Tapping the status badge (Active/Disabled) opens this action menu —
+     * no new XML button needed. Options depend on current state:
+     *   Active   -> "Manual Recharge" (cash payment, with grace period)
+     *               or "Suspend Now"
+     *   Disabled -> "Enable / Reactivate"
+     */
+    private fun showCustomerActionsDialog(doc: DocumentSnapshot, active: Boolean) {
+        val customerId = doc.id
+        val isp = (doc.getString("ispProvider") ?: "EBONE").uppercase(Locale.getDefault())
+
+        if (active) {
+            val options = arrayOf("Manual recharge (cash payment)", "Suspend now")
+            AlertDialog.Builder(this)
+                .setTitle(customerId)
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> showGracePeriodDialog(customerId, isp)
+                        1 -> confirmAndLaunchManualAction(customerId, isp, "SUSPEND")
+                    }
+                }
+                .show()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle(customerId)
+                .setMessage("Re-enable this customer's connection?")
+                .setPositiveButton("Enable") { _, _ ->
+                    launchManualAction(customerId, isp, "ENABLE")
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+
+    /**
+     * "Cash payment received — how many days until they pay in full?"
+     * Selecting a grace option (1/2/3/5/7 days) activates the package
+     * normally on the ISP panel, then ALSO stores a graceDeadline on the
+     * customer doc so GraceDeadlineWorker can flag it for auto-suspend if
+     * that deadline passes with no renewal. "Full month" skips the grace
+     * tracking entirely — same as a normal recharge.
+     */
+    private fun showGracePeriodDialog(customerId: String, isp: String) {
+        val dayOptions = listOf(1, 2, 3, 5, 7, 0) // 0 = full month, no grace tracking
+        val labels = dayOptions.map {
+            if (it == 0) "Full month (normal recharge)" else "$it day(s) — grace period"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Recharge $customerId")
+            .setItems(labels) { _, which ->
+                launchManualRecharge(customerId, isp, dayOptions[which])
+            }
+            .show()
+    }
+
+    private fun launchManualRecharge(customerId: String, isp: String, graceDays: Int) {
+        pendingGraceCustomerId = customerId
+        pendingGraceDays = graceDays
+        val intent = Intent(this, WebViewLoginActivity::class.java).apply {
+            putExtra("selected_isp", isp)
+            putExtra("auto_activate_customer_id", customerId)
+        }
+        startActivityForResult(intent, REQUEST_MANUAL_RECHARGE)
+    }
+
+    private fun confirmAndLaunchManualAction(customerId: String, isp: String, action: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Suspend $customerId?")
+            .setMessage("This will disable their internet connection immediately.")
+            .setPositiveButton("Suspend") { _, _ -> launchManualAction(customerId, isp, action) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun launchManualAction(customerId: String, isp: String, action: String) {
+        val intent = Intent(this, WebViewLoginActivity::class.java).apply {
+            putExtra("selected_isp", isp)
+            putExtra("auto_activate_customer_id", customerId)
+            putExtra("manual_action", action)
+        }
+        startActivity(intent)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_MANUAL_RECHARGE && resultCode == RESULT_OK) {
+            val success = data?.getBooleanExtra("activation_success", false) ?: false
+            val custId = pendingGraceCustomerId
+            val days = pendingGraceDays
+
+            if (success && custId != null) {
+                if (days in 1..7) {
+                    // Grace period selected — store the deadline so
+                    // GraceDeadlineWorker can flag this customer for
+                    // auto-suspend if they don't pay in time.
+                    val deadline = System.currentTimeMillis() + (days * 24L * 60L * 60L * 1000L)
+                    db.collection("customers").document(custId)
+                        .update("graceDeadline", deadline)
+                    Toast.makeText(this, "Activated — grace period: $days day(s)", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Activated (full month)", Toast.LENGTH_SHORT).show()
+                }
+            } else if (custId != null) {
+                Toast.makeText(this, "Recharge did not complete — try again", Toast.LENGTH_SHORT).show()
+            }
+
+            pendingGraceCustomerId = null
+            pendingGraceDays = 0
+        }
+    }
+
     inner class CustomerAdapter(
         private val items: List<Any>
     ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -468,6 +593,14 @@ class CustomerListActivity : AppCompatActivity() {
                 )
 
                 itemView.alpha = 1f
+
+                // NEW: tap the status badge to open the manual-recharge /
+                // suspend / enable action menu — no new XML button needed.
+                tvStatus.isClickable = true
+                tvStatus.isFocusable = true
+                tvStatus.setOnClickListener {
+                    showCustomerActionsDialog(doc, active)
+                }
 
                 btnEdit.setOnClickListener {
                     showEditDialog(doc)
