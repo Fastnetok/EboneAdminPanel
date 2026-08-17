@@ -1,17 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools" >
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
 
     <application
+        android:name=".EboneAdminApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -19,98 +30,41 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.EboneAdminPanel" >
+        android:theme="@style/Theme.EboneAdminPanel">
+
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyBo1bsDO5BIGU8Mt-u_xYfzeN4Ez1BFW84" />
 
-        <activity
-            android:name=".ApprovedDevicesActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PendingDevicesActivity"
-            android:exported="false" />
-        <activity
-            android:name=".MenuActivity"
-            android:exported="false" />
-        <activity
-            android:name=".AllEmployeesActivity"
-            android:exported="false" />
-        <activity
-            android:name=".EmployeeDetailsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".MapActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PendingComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".GeoFenceActivity"
-            android:exported="false" />
-        <activity
-            android:name=".AssignedComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ReportsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".EmployeeReportDetailsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".MovementTrackingActivity"
-            android:exported="false" />
-        <activity
-            android:name=".FuelSettingsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".FuelLogActivity"
-            android:exported="false" />
-        <activity
-            android:name=".AssignComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".GeoFenceManagementActivity"
-            android:exported="false" />
-        <activity
-            android:name=".AddComplaintActivity"
-            android:exported="false" />
-        <activity
-            android:name=".WebViewLoginActivity"
-            android:exported="false" />
-        <activity
-            android:name=".TotalComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".EmployeeComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PendingSummaryActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ProgressActivity"
-            android:exported="false" />
-        <activity
-            android:name=".PendingEmployeeComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ResolvedSummaryActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ResolvedEmployeeComplaintsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ManagementToolsActivity"
-            android:exported="false" />
-        <activity
-            android:name=".SearchActivity"
-            android:exported="false" />
-        <activity
-            android:name=".ExportActivity"
-            android:exported="false" />
-        <activity
-            android:name=".FilterActivity"
-            android:exported="false" />
+        <activity android:name=".PendingDevicesActivity" android:exported="false" />
+        <activity android:name=".MenuActivity" android:exported="false" />
+        <activity android:name=".AllEmployeesActivity" android:exported="false" />
+        <activity android:name=".EmployeeDetailsActivity" android:exported="false" />
+        <activity android:name=".MapActivity" android:exported="false" />
+        <activity android:name=".PendingComplaintsActivity" android:exported="false" />
+        <activity android:name=".GeoFenceActivity" android:exported="false" />
+        <activity android:name=".AssignedComplaintsActivity" android:exported="false" />
+        <activity android:name=".ReportsActivity" android:exported="false" />
+        <activity android:name=".EmployeeReportDetailsActivity" android:exported="false" />
+        <activity android:name=".MovementTrackingActivity" android:exported="false" />
+        <activity android:name=".FuelSettingsActivity" android:exported="false" />
+        <activity android:name=".FuelLogActivity" android:exported="false" />
+        <activity android:name=".AssignComplaintsActivity" android:exported="false" />
+        <activity android:name=".GeoFenceManagementActivity" android:exported="false" />
+        <activity android:name=".AddComplaintActivity" android:exported="false" />
+        <activity android:name=".WebViewLoginActivity" android:exported="false" />
+        <activity android:name=".TotalComplaintsActivity" android:exported="false" />
+        <activity android:name=".EmployeeComplaintsActivity" android:exported="false" />
+        <activity android:name=".PendingSummaryActivity" android:exported="false" />
+        <activity android:name=".ProgressActivity" android:exported="false" />
+        <activity android:name=".PendingEmployeeComplaintsActivity" android:exported="false" />
+        <activity android:name=".ResolvedSummaryActivity" android:exported="false" />
+        <activity android:name=".ResolvedEmployeeComplaintsActivity" android:exported="false" />
+        <activity android:name=".ManagementToolsActivity" android:exported="false" />
+        <activity android:name=".SearchActivity" android:exported="false" />
+        <activity android:name=".ExportActivity" android:exported="false" />
+        <activity android:name=".FilterActivity" android:exported="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="false"
@@ -126,21 +80,78 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".SetPinActivity"
-            android:exported="false" />
+        <activity android:name=".SetPinActivity" android:exported="false" />
+        <activity android:name=".UnlockActivity" android:exported="false" />
 
-        <activity
-            android:name=".UnlockActivity"
-            android:exported="false" />
         <activity
             android:name=".superadmin.dashboard.SuperDashboardActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+
         <activity
             android:name=".superadmin.companymanager.CompanyManagerActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity android:name=".CustomerBillingActivity" android:exported="false" />
+        <activity android:name=".AddCustomerActivity" android:exported="false" />
+        <activity android:name=".IspPanelSettingsActivity" android:exported="false" />
+        <activity android:name=".AddEmployeeActivity" android:exported="false" />
+        <activity android:name=".SmsMatchSettingsActivity" android:exported="false" />
+        <activity android:name=".AppVersionActivity" android:exported="false" />
+
+        <activity
+            android:name=".PaymentLimitActivity"
+            android:exported="false" />
+
+        <activity android:name=".CustomerListActivity" android:exported="false" />
+        <activity android:name=".BiometricAttendanceActivity" android:exported="false" />
+        <activity android:name=".OfficeGeofenceActivity" android:exported="false" />
+        <activity android:name=".SalaryHistoryActivity" android:exported="false" />
+        <activity android:name=".AllSalaryTotalActivity" android:exported="false" />
+        <activity android:name=".OfficeTimmingsActivity" android:exported="false" />
+
+        <receiver
+            android:name=".PaymentSmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".DealerPaymentSmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <activity android:name=".DealerPanelActivity" android:exported="false" />
+        <activity android:name=".DealerDashboardActivity" android:exported="false" />
+
+        <!-- NEW: Full-screen Franchise/Dealer menu opened by ☰ -->
+        <activity
+            android:name=".DealerMenuActivity"
+            android:exported="false" />
+
+        <service
+            android:name=".PaymentActivationService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/provider_paths" />
+        </provider>
+
     </application>
 
 </manifest>

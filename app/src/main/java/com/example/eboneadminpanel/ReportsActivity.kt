@@ -114,10 +114,8 @@ class ReportsActivity : AppCompatActivity() {
                 }
                 2 -> {
                     setActiveButton(filterButton)
-                    filterButton.text = "Month ▾"
-                    val fromTime = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-                    // showTopEmployees = true -> MONTH shows Top Employees + Repeat box too
-                    loadFilteredReport("MONTH", fromTime, showTopEmployees = true)
+                    filterButton.text = "Monthly ▾"
+                    showMonthSelector()
                     true
                 }
                 3 -> {
@@ -136,6 +134,378 @@ class ReportsActivity : AppCompatActivity() {
             }
         }
         popup.show()
+    }
+
+    // MONTHLY REPORTS — current year + future years only
+    private fun showMonthSelector() {
+
+        val currentCalendar = java.util.Calendar.getInstance()
+        val currentYear = currentCalendar.get(java.util.Calendar.YEAR)
+        val currentMonth = currentCalendar.get(java.util.Calendar.MONTH)
+
+        val years = mutableListOf<String>()
+        val yearValues = mutableListOf<Int>()
+
+        // Only current year and future years are offered.
+        for (year in currentYear..(currentYear + 5)) {
+            years.add(year.toString())
+            yearValues.add(year)
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Select Year")
+            .setItems(years.toTypedArray()) { _, which ->
+                val selectedYear = yearValues[which]
+                showMonthSelectorForYear(
+                    selectedYear,
+                    currentYear,
+                    currentMonth
+                )
+            }
+            .show()
+    }
+
+    private fun showMonthSelectorForYear(
+        selectedYear: Int,
+        currentYear: Int,
+        currentMonth: Int
+    ) {
+
+        val months = mutableListOf<String>()
+        val monthValues = mutableListOf<Int>()
+
+        val monthCalendar = java.util.Calendar.getInstance()
+        val monthFormat = java.text.SimpleDateFormat(
+            "MMMM yyyy",
+            java.util.Locale.getDefault()
+        )
+
+        for (month in 0..11) {
+
+            // In the current year, hide future months.
+            if (selectedYear == currentYear && month > currentMonth) {
+                continue
+            }
+
+            monthCalendar.set(
+                java.util.Calendar.YEAR,
+                selectedYear
+            )
+            monthCalendar.set(
+                java.util.Calendar.MONTH,
+                month
+            )
+            monthCalendar.set(
+                java.util.Calendar.DAY_OF_MONTH,
+                1
+            )
+
+            months.add(monthFormat.format(monthCalendar.time))
+            monthValues.add(month)
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Select Month - $selectedYear")
+            .setItems(months.toTypedArray()) { _, which ->
+                loadCalendarMonthReport(
+                    selectedYear,
+                    monthValues[which]
+                )
+            }
+            .show()
+    }
+
+    private fun loadCalendarMonthReport(
+        year: Int,
+        month: Int
+    ) {
+
+        val startCalendar = java.util.Calendar.getInstance()
+        startCalendar.set(
+            year,
+            month,
+            1,
+            0,
+            0,
+            0
+        )
+        startCalendar.set(java.util.Calendar.MILLISECOND, 0)
+
+        val endCalendar = startCalendar.clone() as java.util.Calendar
+        endCalendar.add(java.util.Calendar.MONTH, 1)
+        endCalendar.add(java.util.Calendar.MILLISECOND, -1)
+
+        val fromTime = startCalendar.timeInMillis
+        val toTime = endCalendar.timeInMillis
+
+        val monthLabel = java.text.SimpleDateFormat(
+            "MMMM yyyy",
+            java.util.Locale.getDefault()
+        ).format(startCalendar.time)
+
+        reportList.clear()
+        allReports.clear()
+        adapter.updateAreaList(emptyList())
+        isAreaMode = false
+        sortToggleButton.visibility = android.view.View.GONE
+
+        adapter.updateHeader(
+            ReportHeaderData(
+                summaryText = "📅 $monthLabel\n\nLoading...",
+                topEmployeesVisible = false,
+                repeatVisible = false,
+                areaReportVisible = false
+            )
+        )
+        adapter.notifyDataSetChanged()
+
+        FirebaseDatabase.getInstance()
+            .getReference("resolvedComplaints")
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(resolvedSnapshot: DataSnapshot) {
+
+                    FirebaseDatabase.getInstance()
+                        .getReference("complaints")
+                        .addListenerForSingleValueEvent(object : ValueEventListener {
+                            override fun onDataChange(snapshot: DataSnapshot) {
+
+                                val empMap = mutableMapOf<String, EmpDataR>()
+                                val complaintIds = mutableSetOf<String>()
+
+                                // IDs currently in complaints node.
+                                for (cs in snapshot.children) {
+                                    val id = cs.child("complaintId")
+                                        .getValue(String::class.java)
+                                        ?: cs.key
+                                        ?: ""
+                                    if (id.isNotEmpty()) complaintIds.add(id)
+                                }
+
+                                fun addComplaint(cs: DataSnapshot) {
+                                    val assignedRaw = cs.child("assignedTo")
+                                        .getValue(String::class.java)
+                                        ?: ""
+                                    val assignedTo = normalizeEmployeeName(assignedRaw)
+
+                                    val diagComplaintId = cs.child("complaintId")
+                                        .getValue(String::class.java)
+                                        ?: cs.key
+                                        ?: ""
+
+                                    reportDiag(
+                                        "MONTHLY source=complaint " +
+                                                "id=$diagComplaintId " +
+                                                "rawAssignedTo=[${reportDiagRaw(assignedRaw)}] " +
+                                                "normalized=[$assignedTo]"
+                                    )
+
+                                    if (assignedTo.isEmpty()) return
+
+                                    val createdTime = cs.child("createdTime")
+                                        .getValue(Long::class.java) ?: 0L
+                                    if (createdTime !in fromTime..toTime) return
+
+                                    val userId = cs.child("userId")
+                                        .getValue(String::class.java) ?: ""
+                                    val status = cs.child("status")
+                                        .getValue(String::class.java) ?: ""
+                                    val resolvedTime = cs.child("resolvedTime")
+                                        .getValue(Long::class.java) ?: 0L
+                                    val assignedTime = cs.child("assignedTime")
+                                        .getValue(Long::class.java) ?: 0L
+
+                                    val wasExisting = empMap.containsKey(assignedTo)
+                                    val emp = empMap.getOrPut(assignedTo) { EmpDataR() }
+
+                                    reportDiag(
+                                        "MONTHLY MAP key=[$assignedTo] existing=$wasExisting beforeTotal=${emp.totalAssigned}"
+                                    )
+
+                                    emp.totalAssigned++
+                                    if (userId.isNotEmpty()) emp.userIds.add(userId)
+
+                                    if (status.equals("Resolved", true)) {
+                                        emp.totalResolved++
+                                        if (resolvedTime > 0L && assignedTime > 0L && resolvedTime >= assignedTime) {
+                                            emp.totalResolveTime += resolvedTime - assignedTime
+                                            emp.resolvedWithTime++
+                                        }
+                                    } else if (status.equals("Pending", true)) {
+                                        emp.totalPending++
+                                    } else {
+                                        emp.totalProgress++
+                                    }
+                                }
+
+                                // complaints node
+                                for (cs in snapshot.children) {
+                                    addComplaint(cs)
+                                }
+
+                                // resolvedComplaints node — skip complaints already present above.
+                                for (cs in resolvedSnapshot.children) {
+                                    val complaintId = cs.child("complaintId")
+                                        .getValue(String::class.java)
+                                        ?: cs.key
+                                        ?: ""
+                                    if (complaintId.isNotEmpty() && complaintIds.contains(complaintId)) {
+                                        reportDiag(
+                                            "MONTHLY source=resolvedComplaints SKIPPED_DUPLICATE id=$complaintId"
+                                        )
+                                        continue
+                                    }
+
+                                    reportDiag(
+                                        "MONTHLY source=resolvedComplaints ADDING id=$complaintId"
+                                    )
+                                    addComplaint(cs)
+                                }
+
+                                val reports = mutableListOf<ReportItem>()
+                                var total = 0
+                                var resolved = 0
+                                var pending = 0
+                                var progress = 0
+
+                                for ((name, emp) in empMap) {
+                                    if (emp.totalAssigned <= 0) continue
+
+                                    val repeat = emp.userIds
+                                        .filter { it.isNotEmpty() }
+                                        .groupBy { it }
+                                        .values
+                                        .count { it.size > 1 }
+
+                                    val successRate =
+                                        (emp.totalResolved * 100) / emp.totalAssigned
+
+                                    val averageTime = if (emp.resolvedWithTime > 0) {
+                                        val avgMs = emp.totalResolveTime / emp.resolvedWithTime
+                                        val hours = avgMs / (1000 * 60 * 60)
+                                        val minutes = (avgMs % (1000 * 60 * 60)) / (1000 * 60)
+                                        "${hours}h ${minutes}m"
+                                    } else {
+                                        "N/A"
+                                    }
+
+                                    total += emp.totalAssigned
+                                    resolved += emp.totalResolved
+                                    pending += emp.totalPending
+                                    progress += emp.totalProgress
+
+                                    reports.add(
+                                        ReportItem(
+                                            employeeName = name,
+                                            assigned = emp.totalAssigned,
+                                            pending = emp.totalPending,
+                                            progress = emp.totalProgress,
+                                            resolved = emp.totalResolved,
+                                            successRate = successRate,
+                                            repeatComplaints = repeat,
+                                            todayCount = emp.totalAssigned,
+                                            weekCount = emp.totalAssigned,
+                                            monthCount = emp.totalAssigned,
+                                            averageTime = averageTime,
+                                            weekAssigned = emp.totalAssigned,
+                                            weekResolved = emp.totalResolved,
+                                            weekPending = emp.totalPending,
+                                            weekRepeat = repeat,
+                                            monthAssigned = emp.totalAssigned,
+                                            monthResolved = emp.totalResolved,
+                                            monthPending = emp.totalPending,
+                                            monthRepeat = repeat,
+                                            monthSuccessRate = successRate
+                                        )
+                                    )
+                                }
+
+                                reportDiag(
+                                    "MONTHLY FINAL empMapSize=${empMap.size} reportsSize=${reports.size} " +
+                                            "names=${reports.joinToString(" | ") { it.employeeName + "=" + it.assigned }}"
+                                )
+
+                                // Monthly employee ranking: highest total complaints first.
+                                reports.sortWith(
+                                    compareByDescending<ReportItem> { it.assigned }
+                                        .thenByDescending { it.resolved }
+                                        .thenByDescending { it.successRate }
+                                        .thenBy { it.employeeName }
+                                )
+
+                                reportList.clear()
+                                allReports.clear()
+                                reportList.addAll(reports)
+                                allReports.addAll(reports)
+
+                                val medals = listOf("🥇", "🥈", "🥉")
+                                val topText = reports.take(3)
+                                    .mapIndexed { index, report ->
+                                        "${medals[index]} ${report.employeeName}\n" +
+                                                "Total    : ${report.assigned}\n" +
+                                                "Resolved : ${report.resolved}\n" +
+                                                "Rate     : ${report.successRate}%"
+                                    }
+                                    .joinToString("\n-----------------\n")
+
+                                val totalRepeat = reports.sumOf { it.repeatComplaints }
+
+                                adapter.updateHeader(
+                                    ReportHeaderData(
+                                        topEmployeesText = "🏆 TOP EMPLOYEES\n\n$topText",
+                                        topEmployeesVisible = reports.isNotEmpty(),
+                                        summaryText = "📅 $monthLabel\n\n" +
+                                                "Total     : $total\n" +
+                                                "Pending   : $pending\n" +
+                                                "Progress  : $progress\n" +
+                                                "Resolved  : $resolved",
+                                        summaryVisible = true,
+                                        repeatText = "⚠️ REPEAT COMPLAINTS\n\nTotal Repeat : $totalRepeat",
+                                        repeatVisible = true,
+                                        areaReportVisible = false
+                                    )
+                                )
+
+                                reportDiag(
+                                    "MONTHLY ADAPTER_LIST size=${reportList.size} names=${reportList.joinToString(" | ") { it.employeeName }}"
+                                )
+                                adapter.notifyDataSetChanged()
+                            }
+
+                            override fun onCancelled(error: DatabaseError) {
+                                Toast.makeText(
+                                    this@ReportsActivity,
+                                    "Complaints load failed",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        })
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Toast.makeText(
+                        this@ReportsActivity,
+                        "Resolved complaints load failed",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            })
+    }
+
+    private fun normalizeEmployeeName(name: String): String {
+        return name
+            .trim()
+            .replace(Regex("\\s+"), " ")
+            .lowercase(java.util.Locale.getDefault())
+    }
+
+    private fun reportDiagRaw(value: String): String {
+        return value.map { ch ->
+            "${ch}(U+${ch.code.toString(16).uppercase()})"
+        }.joinToString(" ")
+    }
+
+    private fun reportDiag(message: String) {
+        android.util.Log.d("REPORT_DIAG", message)
     }
 
     private fun showCustomDatePicker() {
@@ -838,6 +1208,7 @@ class ReportsActivity : AppCompatActivity() {
         var totalPending: Int = 0,
         var totalProgress: Int = 0,
         var totalResolveTime: Long = 0L,
-        var resolvedWithTime: Int = 0
+        var resolvedWithTime: Int = 0,
+        val userIds: MutableList<String> = mutableListOf()
     )
 }

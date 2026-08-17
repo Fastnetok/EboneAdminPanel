@@ -38,12 +38,9 @@ android {
         applicationId = "com.example.eboneadminpanel"
         minSdk = 24
         targetSdk = 36
-
-        versionCode = 23
-        versionName = "1.0.23"
-
-        testInstrumentationRunner =
-            "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 36
+        versionName = "1.0.36"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRenderer"
     }
 
     buildTypes {
@@ -76,6 +73,7 @@ android {
 
     buildFeatures {
         compose = true
+        viewBinding = true
     }
 }
 
@@ -105,6 +103,11 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     implementation("androidx.biometric:biometric:1.1.0")
+
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Auto-Sync — Payment Sync Worker (background 15/30/45/60 min check)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     implementation(
         platform(
@@ -173,3 +176,4 @@ dependencies {
         libs.androidx.compose.ui.tooling
     )
 }
+// test1

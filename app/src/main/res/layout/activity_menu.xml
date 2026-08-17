@@ -30,12 +30,39 @@
             android:textSize="18sp"/>
 
         <TextView
-            android:id="@+id/menuPendingDevices"
+            android:id="@+id/menuBiometricAttendance"
             android:layout_width="match_parent"
             android:layout_height="55dp"
             android:gravity="center_vertical"
             android:paddingStart="20dp"
-            android:text="Pending Devices"
+            android:text="Employee Biometric Attendance"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuOfficeTimings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Office Timings"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuAppVersion"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="App Version Status"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuAddEmployee"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Add Employee"
             android:textSize="18sp"/>
 
         <TextView
@@ -63,6 +90,51 @@
             android:gravity="center_vertical"
             android:paddingStart="20dp"
             android:text="Movement Tracking"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuCustomerBilling"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Customer Billing"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/menuAddCustomer"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Add Customer"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuIspPanelSettings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="ISP Panel Settings"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuSmsMatchSettings"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="SMS Match Settings"
+            android:textSize="18sp"/>
+
+        <TextView
+            android:id="@+id/menuDealerPanel"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Dealer Panel"
             android:textSize="18sp"/>
 
         <TextView
