@@ -27,6 +27,14 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private var loginDone = false
+    // Prevents tryAutoLogin() from being started twice concurrently — it
+    // was previously triggered both by a selectedIsp-specific URL branch
+    // AND a generic "safety net" ~600ms later, and both could fire
+    // before either finished, causing two overlapping fill/submit
+    // attempts to interfere with each other. Reset to false on every
+    // fresh page load. Confirmed fix — Ebone/Zong dealer recharge tested
+    // and passing with this in place.
+    private var loginAttemptInProgress = false
     private var zongDealerMode = false
     private var activeAccountName = ""
     private var selectedIsp = "EBONE"
@@ -35,14 +43,37 @@ class WebViewLoginActivity : AppCompatActivity() {
     private var transactionId: String? = null
     private val db by lazy { FirebaseFirestore.getInstance() }
 
-    // NEW: "SUSPEND" | "ENABLE" | null (null = normal package activation,
-    // the original SMS/manual-recharge flow this activity already did).
-    // Passed in via intent extra "manual_action".
     private var manualAction: String? = null
 
+    private var dealerEboneId: String? = null
+    private var topupAmount: String? = null
+    private var eboneTopupSubmitAttempted = false
+    private var eboneBalanceCheckAttempted = false
+
+    private var wateenDealerListLoadAttempted = false
+    private var wateenDealerSearchAttempted = false
+    private var wateenTopupSubmitAttempted = false
+    private var wateenBalanceCheckAttempted = false
+
+    private var zongDealerListLoadAttempted = false
+    private var zongTopupSubmitAttempted = false
+    private var zongBalanceCheckAttempted = false
+
+    private var dealerInternalId: String? = null
+    private var dealerDisplayName: String? = null
+
+    private var dealerSearchName: String? = null
+
+    // NEW: which zone/franchise's login to use (Okara/Renala/etc).
+    // Defaults to "Okara" so any call site that doesn't pass this yet
+    // behaves exactly like the stable single-zone version.
+    private var targetZone: String = "Okara"
+
+    private var sourceTransactionId: String? = null
+
+    private var debugTapInspectorEnabled = false
+
     companion object {
-        // Ebone: suspending/enabling a customer = changing their partner.ebill.pk
-        // password to one of these two fixed values (confirmed by admin).
         private const val EBONE_SUSPEND_PASSWORD = "8888"
         private const val EBONE_ENABLE_PASSWORD = "1001"
     }
@@ -53,35 +84,54 @@ class WebViewLoginActivity : AppCompatActivity() {
     private val WATEEN_PREFS = "wateen_accounts"
     private val ZONG_PREFS = "zong_accounts"
 
-    // NEW: session cache specifically for ISP Panel Settings logins.
-    // These credentials never had cookie reuse before — every complaint
-    // creation re-ran the FULL login form fill, even when a still-valid
-    // session existed. This cache fixes that: reuse the cookie until the
-    // panel itself tells us the session expired (redirects to its login
-    // page), at which point handlePageLoaded() already calls
-    // tryAutoLogin() automatically.
     private val ISP_SESSION_PREFS = "isp_session_cookies"
 
     private fun getIspSessionCookie(isp: String): String {
-        return securePrefs(ISP_SESSION_PREFS).getString(isp, "") ?: ""
+        // Keyed by isp+zone — Okara's Zong session and Renala's Zong
+        // session are cached completely separately.
+        return securePrefs(ISP_SESSION_PREFS).getString("${isp}_$targetZone", "") ?: ""
     }
 
     private fun saveIspSessionCookie(isp: String, cookie: String) {
-        securePrefs(ISP_SESSION_PREFS).edit().putString(isp, cookie).apply()
+        securePrefs(ISP_SESSION_PREFS).edit().putString("${isp}_$targetZone", cookie).apply()
     }
 
-    /** Called right after a successful login — if this login used ISP
-     * Panel Settings credentials (not the old manual account store),
-     * cache the resulting cookie so the NEXT complaint reuses the
-     * session instead of logging in again. */
     private fun cacheIspSessionCookieIfApplicable(isp: String, domain: String) {
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, isp)
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, isp, targetZone)
         if (!ispUsername.isNullOrEmpty()) {
             val cookie = CookieManager.getInstance().getCookie(domain)
             if (!cookie.isNullOrEmpty()) {
                 saveIspSessionCookie(isp, cookie)
             }
         }
+    }
+
+    /**
+     * NEW: expires every cookie for ONE specific domain only, leaving
+     * every OTHER domain's cookies completely untouched. Android's
+     * CookieManager has no built-in "clear cookies for domain X only"
+     * method — removeAllCookies() is global across the whole app. This
+     * reads whatever cookie names are currently set for [domain] and
+     * individually expires each one (Max-Age=0), which only affects
+     * that domain's session.
+     *
+     * Used so that, e.g., resetting Zong's cookie before switching
+     * between Okara's and Renala's sessions (same domain,
+     * turbonet.zong.com.pk) never disturbs Ebone's or Wateen's
+     * completely separate, still-valid sessions on their own domains —
+     * preserving the "stay logged in" convenience for those (e.g. the
+     * admin Complaint screen) that a full removeAllCookies() would
+     * otherwise destroy on every single launch.
+     */
+    private fun clearCookiesForDomain(domain: String) {
+        val existing = CookieManager.getInstance().getCookie(domain) ?: return
+        val cookieNames = existing.split(";")
+            .map { it.trim().substringBefore("=") }
+            .filter { it.isNotBlank() }
+        for (name in cookieNames) {
+            CookieManager.getInstance().setCookie(domain, "$name=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
+        }
+        CookieManager.getInstance().flush()
     }
 
     override fun onResume() {
@@ -134,7 +184,16 @@ class WebViewLoginActivity : AppCompatActivity() {
         selectedIsp = intent.getStringExtra("selected_isp") ?: "EBONE"
         autoActivateCustomerId = intent.getStringExtra("auto_activate_customer_id")
         transactionId = intent.getStringExtra("transaction_id")
-        manualAction = intent.getStringExtra("manual_action") // "SUSPEND" | "ENABLE" | null
+        manualAction = intent.getStringExtra("manual_action")
+        dealerEboneId = intent.getStringExtra("dealer_ebone_id")
+        topupAmount = intent.getStringExtra("topup_amount")
+        dealerInternalId = intent.getStringExtra("dealer_internal_id")
+        dealerDisplayName = intent.getStringExtra("dealer_display_name")
+        sourceTransactionId = intent.getStringExtra("source_transaction_id")
+        dealerSearchName = intent.getStringExtra("dealer_search_name")
+        targetZone = intent.getStringExtra("target_zone")?.ifBlank { null } ?: "Okara"
+
+        debugTapInspectorEnabled = intent.getBooleanExtra("debug_tap_inspector", false)
 
         webView = findViewById(R.id.loginWebView)
 
@@ -160,6 +219,18 @@ class WebViewLoginActivity : AppCompatActivity() {
         settings.userAgentString =
             "Mozilla/5.0 (Linux; Android 6.0) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
 
+        if (debugTapInspectorEnabled) {
+            webView.addJavascriptInterface(object {
+                @android.webkit.JavascriptInterface
+                fun onTap(info: String) {
+                    runOnUiThread {
+                        Toast.makeText(this@WebViewLoginActivity, info, Toast.LENGTH_LONG).show()
+                        android.util.Log.d("TapInspector", info)
+                    }
+                }
+            }, "TapInspector")
+        }
+
         webView.webChromeClient = WebChromeClient()
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -171,14 +242,28 @@ class WebViewLoginActivity : AppCompatActivity() {
                         null
                     )
                 }
+
+                if (debugTapInspectorEnabled) {
+                    webView.evaluateJavascript(
+                        "(function(){" +
+                                "  if (window.__tapInspectorInstalled) return;" +
+                                "  window.__tapInspectorInstalled = true;" +
+                                "  document.addEventListener('click', function(e){" +
+                                "    var el = e.target;" +
+                                "    var info = 'TAG: ' + el.tagName +" +
+                                "      ' | id=' + (el.id || '-') +" +
+                                "      ' | name=' + (el.getAttribute('name') || '-') +" +
+                                "      ' | class=' + (el.className || '-') +" +
+                                "      ' | text=' + (el.innerText ? el.innerText.substring(0,40) : '-');" +
+                                "    if (window.TapInspector) window.TapInspector.onTap(info);" +
+                                "  }, true);" +
+                                "})()", null
+                    )
+                }
+
                 handlePageLoaded(url)
 
-                // NEW: safety net — if the URL-based login detection above
-                // didn't match (e.g. the ISP redirected to a login URL that
-                // doesn't contain the expected substring), but this page
-                // actually IS a login form and we haven't logged in yet,
-                // still trigger auto-login instead of leaving the form blank.
-                if (!loginDone) {
+                if (!loginDone && !loginAttemptInProgress) {
                     webView.postDelayed({
                         webView.evaluateJavascript(
                             "(function(){" +
@@ -186,7 +271,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                                     "  return p ? 'has_password_field' : 'no';" +
                                     "})()"
                         ) { hasPasswordField ->
-                            if (hasPasswordField.trim().removeSurrounding("\"") == "has_password_field" && !loginDone) {
+                            if (hasPasswordField.trim().removeSurrounding("\"") == "has_password_field" && !loginDone && !loginAttemptInProgress) {
                                 tryAutoLogin()
                             }
                         }
@@ -253,14 +338,42 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
-        // PRIMARY: ISP Panel Settings credentials — reuse the saved
-        // session cookie if we have one, instead of always re-logging in.
-        // If the cookie has expired, the panel will redirect to its own
-        // login page and handlePageLoaded() detects that and calls
-        // tryAutoLogin() automatically — so this is always safe.
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp)
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp, targetZone)
+
         if (!ispUsername.isNullOrEmpty()) {
             val savedCookie = getIspSessionCookie(selectedIsp)
+            // Single, targeted diagnostic — shows exactly which
+            // zone/username this launch resolved to, and whether a
+            // cached session was reused vs a fresh login forced.
+            Toast.makeText(
+                this,
+                "$selectedIsp/$targetZone → user=$ispUsername, cached_cookie=${if (savedCookie.isEmpty()) "NONE (fresh login)" else "${savedCookie.length} chars (restoring this zone's own session)"}",
+                Toast.LENGTH_LONG
+            ).show()
+
+            // CRITICAL: ALWAYS wipe every cookie first, unconditionally
+            // — for EVERY launch, not just when our own cache is empty.
+            // Android's CookieManager is a single shared jar across the
+            // whole app, keyed only by domain, with zero concept of
+            // "zone". Even though we cache each zone's session
+            // separately on OUR side, if a DIFFERENT zone's session
+            // cookie is still technically live in the real browser jar
+            // (e.g. Okara's, from any earlier login this app session),
+            // simply calling setCookie() for Renala's value does not
+            // CRITICAL: clear cookies for THIS ISP's domain ONLY —
+            // never the whole app. Android's CookieManager is a single
+            // shared jar keyed by domain, with zero concept of "zone".
+            // Okara-Zong and Renala-Zong share the SAME domain
+            // (turbonet.zong.com.pk), so clearing just that domain
+            // before restoring this zone's own saved cookie removes any
+            // stale cross-zone session cleanly. Crucially, this does
+            // NOT touch Ebone's or Wateen's cookies (different domains)
+            // — so their own persistent sessions (e.g. the Complaint
+            // screen's "already logged in" convenience) are completely
+            // unaffected, unlike the earlier removeAllCookies(null)
+            // version which wiped every ISP's session on every launch.
+            clearCookiesForDomain(domainFor(selectedIsp))
+
             if (savedCookie.isNotEmpty()) {
                 CookieManager.getInstance().setCookie(domainFor(selectedIsp), savedCookie)
                 CookieManager.getInstance().flush()
@@ -271,7 +384,26 @@ class WebViewLoginActivity : AppCompatActivity() {
             return
         }
 
-        // FALLBACK: old per-ISP manual account store
+        // No login configured for this isp+zone combo at all. If a
+        // specific non-Okara zone was requested, still show the blank
+        // login page (browser stays visible, as requested) — just don't
+        // fall through to the old zone-unaware fallback store, which
+        // previously caused a real wrong-account incident.
+        if (!targetZone.equals("Okara", ignoreCase = true)) {
+            Toast.makeText(
+                this,
+                "No $selectedIsp login saved for zone \"$targetZone\" yet — add it in ISP Panel Settings.",
+                Toast.LENGTH_LONG
+            ).show()
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            webView.loadUrl(loginUrlFor(selectedIsp))
+            return
+        }
+
+        // FALLBACK: old per-ISP manual account store — only reachable
+        // for the default "Okara" zone, exactly as in the stable
+        // version.
         val accounts = loadAccounts()
         val active = securePrefs(getPrefsName()).getString(KEY_ACTIVE, "") ?: ""
         if (active.isNotEmpty() && accounts.has(active)) {
@@ -281,12 +413,8 @@ class WebViewLoginActivity : AppCompatActivity() {
             if (cookie.isNotEmpty()) {
                 CookieManager.getInstance().setCookie(domainFor(selectedIsp), cookie)
                 CookieManager.getInstance().flush()
-                // Do NOT set loginDone=true here — let handlePageLoaded confirm
-                // whether the cookie is still valid. If expired, the panel will
-                // redirect to login page and handlePageLoaded will call tryAutoLogin().
                 webView.loadUrl(clientsUrlFor(selectedIsp))
             } else {
-                // No cookie saved — go straight to login
                 webView.loadUrl(loginUrlFor(selectedIsp))
             }
         } else {
@@ -398,17 +526,22 @@ class WebViewLoginActivity : AppCompatActivity() {
     private fun handlePageLoaded(url: String) {
         when {
             selectedIsp == "EBONE" && (url.contains("logincheck") || url.contains("login")) -> {
-                loginDone = false; tryAutoLogin()
+                loginDone = false; loginAttemptInProgress = false; tryAutoLogin()
             }
             selectedIsp == "WATEEN" && url.contains("auth.html") -> {
-                loginDone = false; tryAutoLogin()
+                loginDone = false; loginAttemptInProgress = false; tryAutoLogin()
             }
             selectedIsp == "ZONG" && url.contains("login.php") -> {
-                loginDone = false; tryAutoLogin()
+                loginDone = false; loginAttemptInProgress = false; tryAutoLogin()
             }
-            // NEW: Ebone suspend/enable — password-change page loaded
             selectedIsp == "EBONE" && url.contains("/clients/clientChange/") && manualAction != null -> {
                 fillEbonePasswordAndSubmit()
+            }
+            selectedIsp == "EBONE" && url.contains("/payments/addbalance/") && manualAction == "DEALER_TOPUP" -> {
+                if (!eboneTopupSubmitAttempted) {
+                    eboneTopupSubmitAttempted = true
+                    fillDealerTopupAmountAndSubmit()
+                }
             }
             selectedIsp == "EBONE" && url.contains("/clients/clientStats/") -> {
                 clickEboneSubmitButton()
@@ -418,7 +551,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     .substringAfterLast("/clients/client/")
                     .substringBefore("?")
                     .trim()
-                    .trimEnd('/')  // Fix: trailing slash causes mismatch
+                    .trimEnd('/')
                 if (urlCustomerId != autoActivateCustomerId) {
                     android.util.Log.e("WebViewLoginActivity", "Customer ID mismatch — expected $autoActivateCustomerId, got $urlCustomerId. Aborting to avoid activating wrong customer.")
                 } else if (eboneSubmitClicked) {
@@ -448,7 +581,8 @@ class WebViewLoginActivity : AppCompatActivity() {
             }
             selectedIsp == "EBONE" && url.contains("partner.ebill.pk") &&
                     !url.contains("/clients/client/") && !url.contains("/clients/clientStats/") &&
-                    !url.contains("/clients/clientChange/") -> {
+                    !url.contains("/clients/clientChange/") &&
+                    !url.contains("/payments/addbalance/") -> {
                 loginDone = true
                 saveCookieForCurrentAccount("https://partner.ebill.pk")
                 cacheIspSessionCookieIfApplicable("EBONE", "https://partner.ebill.pk")
@@ -456,38 +590,104 @@ class WebViewLoginActivity : AppCompatActivity() {
                 webView.evaluateJavascript(
                     "document.querySelectorAll('.modal,.modal-backdrop,.popup').forEach(function(el){el.style.display='none';});document.body.classList.remove('modal-open');", null
                 )
-                if (!url.contains("/clients")) {
+                if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
+                    webView.postDelayed({
+                        webView.loadUrl("https://partner.ebill.pk/payments/addbalance/${dealerEboneId}")
+                    }, 800)
+                } else if (manualAction == "CHECK_BALANCE") {
+                    if (!eboneBalanceCheckAttempted) {
+                        eboneBalanceCheckAttempted = true
+                        webView.postDelayed({ readEboneFranchiseBalance() }, 800)
+                    }
+                } else if (!url.contains("/clients")) {
                     webView.postDelayed({ webView.loadUrl("https://partner.ebill.pk/clients") }, 800)
                 } else if (autoActivateCustomerId != null) {
                     webView.postDelayed({ searchEboneCustomer(autoActivateCustomerId!!) }, 800)
                 }
             }
             selectedIsp == "WATEEN" && url.contains("panel.wateen.com") &&
-                    !url.contains("auth.html") && !url.contains("/user/user/view/") -> {
+                    !url.contains("auth.html") && !url.contains("/user/user/view/") &&
+                    !url.contains("/dealer/dealer/") -> {
                 loginDone = true
                 saveCookieForCurrentAccount("https://panel.wateen.com")
                 cacheIspSessionCookieIfApplicable("WATEEN", "https://panel.wateen.com")
-                if (!url.contains("/user/user/all")) {
+                if ((manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) ||
+                    (manualAction == "FETCH_DEALER_ID" && !dealerSearchName.isNullOrBlank())) {
+                    if (!wateenDealerListLoadAttempted) {
+                        wateenDealerListLoadAttempted = true
+                        webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/dealer/dealer/all") }, 800)
+                    }
+                } else if (manualAction == "CHECK_BALANCE") {
+                    // NEW: "My Balance" only exists on the root dashboard
+                    // page — reading it directly wherever we happened to
+                    // land (e.g. /user/user/all, if a cached session
+                    // cookie sent us straight there) silently failed.
+                    // Navigate to root first, then read once actually
+                    // there.
+                    val onWateenRoot = !url.contains("/user/user/") && !url.contains("/dealer/dealer/")
+                    if (onWateenRoot) {
+                        if (!wateenBalanceCheckAttempted) {
+                            wateenBalanceCheckAttempted = true
+                            webView.postDelayed({ readWateenFranchiseBalance() }, 800)
+                        }
+                    } else if (!wateenBalanceCheckAttempted) {
+                        webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/") }, 800)
+                    }
+                } else if (!url.contains("/user/user/all")) {
                     webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/user/user/all") }, 800)
                 } else {
                     autoActivateCustomerId?.let { id -> webView.postDelayed({ searchWateenCustomer(id) }, 800) }
                 }
             }
+            selectedIsp == "WATEEN" && url.contains("/dealer/dealer/all") &&
+                    (manualAction == "DEALER_TOPUP" || manualAction == "FETCH_DEALER_ID") -> {
+                if (!wateenDealerSearchAttempted) {
+                    wateenDealerSearchAttempted = true
+                    val searchTerm = if (manualAction == "FETCH_DEALER_ID") dealerSearchName else dealerEboneId
+                    webView.postDelayed({ searchWateenDealer(searchTerm ?: "") }, 900)
+                }
+            }
+            selectedIsp == "WATEEN" && url.contains("/dealer/dealer/view/") && manualAction == "DEALER_TOPUP" -> {
+                if (!wateenTopupSubmitAttempted) {
+                    wateenTopupSubmitAttempted = true
+                    Toast.makeText(this, "Step 0/4: Reached page: $url", Toast.LENGTH_LONG).show()
+                    android.util.Log.d("WebViewLoginActivity", "Wateen dealer topup — landed on: $url")
+                    webView.postDelayed({ openWateenPaymentModalAndSubmit() }, 1800)
+                }
+            }
             selectedIsp == "ZONG" && url.contains("turbonet.zong.com.pk") &&
-                    !url.contains("login.php") && !url.contains("customer_portal.php") -> {
+                    !url.contains("login.php") && !url.contains("customer_portal.php") &&
+                    !url.contains("sub_dealers.php") -> {
                 loginDone = true
                 if (!zongDealerMode) {
                     saveCookieForCurrentAccount("https://turbonet.zong.com.pk")
                     cacheIspSessionCookieIfApplicable("ZONG", "https://turbonet.zong.com.pk")
                 }
-                if (!url.contains("customers.php")) {
+                if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
+                    if (!zongDealerListLoadAttempted) {
+                        zongDealerListLoadAttempted = true
+                        Toast.makeText(this, "Step 0/4: Logged in — opening Sub-Dealers list…", Toast.LENGTH_SHORT).show()
+                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/sub_dealers.php") }, 800)
+                    }
+                } else if (manualAction == "CHECK_BALANCE") {
+                    // NEW: "Available Credit" only exists on the root
+                    // dashboard page — reading it directly on
+                    // customers.php (where a cached-cookie reuse lands
+                    // us) silently failed since the button isn't there.
+                    // Navigate to root first, then read once actually
+                    // there.
+                    val onZongRoot = !url.contains("customers.php")
+                    if (onZongRoot) {
+                        if (!zongBalanceCheckAttempted) {
+                            zongBalanceCheckAttempted = true
+                            webView.postDelayed({ readZongFranchiseBalance() }, 800)
+                        }
+                    } else if (!zongBalanceCheckAttempted) {
+                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/") }, 800)
+                    }
+                } else if (!url.contains("customers.php")) {
                     webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/customers.php") }, 800)
                 } else {
-                    // Always expand "Show entries" to 1000 as soon as we
-                    // land here — Zong only loads 25 rows by default, so
-                    // WITHOUT this, manually searching inside the panel
-                    // (plain Login button flow, no pre-picked customer)
-                    // only searches whatever 25 happen to be loaded.
                     webView.evaluateJavascript(
                         "(function(){" +
                                 "  var sel = document.querySelector('select[name=\"managercustomers_length\"]');" +
@@ -497,6 +697,12 @@ class WebViewLoginActivity : AppCompatActivity() {
                     webView.postDelayed({
                         autoActivateCustomerId?.let { id -> searchZongCustomer(id) }
                     }, 2000)
+                }
+            }
+            selectedIsp == "ZONG" && url.contains("sub_dealers.php") && manualAction == "DEALER_TOPUP" -> {
+                if (!zongTopupSubmitAttempted) {
+                    zongTopupSubmitAttempted = true
+                    webView.postDelayed({ searchAndCreditZongDealer(dealerEboneId ?: "", topupAmount ?: "") }, 1200)
                 }
             }
         }
@@ -515,39 +721,63 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun tryAutoLogin() {
-        // PRIMARY: Check ISP Panel Settings (non-dealer accounts only)
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp)
-        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, selectedIsp)
+        if (loginAttemptInProgress) return
+        loginAttemptInProgress = true
+
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp, targetZone)
+        val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, selectedIsp, targetZone)
         if (!ispUsername.isNullOrEmpty() && !ispPassword.isNullOrEmpty()) {
             doLoginWith(ispUsername, ispPassword)
             return
         }
-        // FALLBACK: Old per-ISP account store
-        if (activeAccountName.isEmpty()) return
+        // No login found for a specific non-Okara zone — release the
+        // guard and stop here (blank form stays visible, nothing typed,
+        // nothing submitted). Do NOT fall through to the old
+        // zone-unaware fallback store — that's what previously caused a
+        // real wrong-account incident.
+        if (!targetZone.equals("Okara", ignoreCase = true)) {
+            loginAttemptInProgress = false
+            return
+        }
+        if (activeAccountName.isEmpty()) { loginAttemptInProgress = false; return }
         val accounts = loadAccounts()
-        if (!accounts.has(activeAccountName)) return
+        if (!accounts.has(activeAccountName)) { loginAttemptInProgress = false; return }
         val acc = accounts.getJSONObject(activeAccountName)
         val username = acc.optString("username", "")
         val password = acc.optString("password", "")
-        if (username.isEmpty() || password.isEmpty()) return
+        if (username.isEmpty() || password.isEmpty()) { loginAttemptInProgress = false; return }
         doLoginWith(username, password)
     }
 
-    private fun doLoginWith(username: String, password: String) {
+    private fun doLoginWith(username: String, password: String, attempt: Int = 1) {
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
                         "  var u = document.querySelector('input[type=text],input[name=username],input[name=email],#username,#email');" +
                         "  var p = document.querySelector('input[type=password],#password');" +
                         "  var b = document.querySelector('#send,button[type=submit],input[type=submit],.btn-login,#login-btn');" +
-                        "  if(u) u.value='" + username + "';" +
-                        "  if(p) p.value='" + password + "';" +
-                        "  if(u && p && b){ b.click(); return 'submitted'; }" +
-                        "  if(b){ b.click(); return 'submitted via button only'; }" +
-                        "  return 'not found';" +
-                        "})()", null
-            )
-        }, 1200)
+                        "  if(!u || !p){ return 'fields_not_ready'; }" +
+                        "  u.value='" + username + "';" +
+                        "  u.dispatchEvent(new Event('input',{bubbles:true}));" +
+                        "  u.dispatchEvent(new Event('change',{bubbles:true}));" +
+                        "  p.value='" + password + "';" +
+                        "  p.dispatchEvent(new Event('input',{bubbles:true}));" +
+                        "  p.dispatchEvent(new Event('change',{bubbles:true}));" +
+                        "  if(b){ b.click(); return 'submitted'; }" +
+                        "  return 'submitted_no_button';" +
+                        "})()"
+            ) { resultRaw ->
+                val result = resultRaw.trim().removeSurrounding("\"")
+                if (result == "fields_not_ready" && attempt < 6) {
+                    doLoginWith(username, password, attempt + 1)
+                } else {
+                    loginAttemptInProgress = false
+                    if (result == "fields_not_ready") {
+                        Toast.makeText(this, "Login form fields never appeared on $selectedIsp after $attempt attempts", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }, if (attempt == 1) 1800L else 900L)
     }
 
     private fun writeActivationResultToFirestore(success: Boolean, expiry: String) {
@@ -564,22 +794,12 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    // ===================== NEW: MANUAL SUSPEND / ENABLE =====================
-
-    /**
-     * Called once the SUSPEND/ENABLE action has actually gone through on
-     * the ISP panel side (Ebone password changed, or Wateen/Zong
-     * disable/enable link hit). Updates Firestore, tells the calling
-     * screen it worked, and closes the WebView.
-     */
     private fun finishManualActionSuccess() {
         val custId = autoActivateCustomerId
         if (custId != null) {
             val newStatus = if (manualAction == "SUSPEND") "DISABLED" else "ACTIVE"
             val updates = mutableMapOf<String, Any>("activationStatus" to newStatus)
             if (manualAction == "ENABLE") {
-                // Re-enabling clears any pending grace deadline and resets
-                // the billing cycle from right now.
                 updates["lastPaymentDate"] = System.currentTimeMillis()
                 updates["graceDeadline"] = FieldValue.delete()
             }
@@ -600,13 +820,8 @@ class WebViewLoginActivity : AppCompatActivity() {
         finish()
     }
 
-    /** Ebone: fills the new-password field on /clients/clientChange/{id}
-     * with the fixed suspend/enable code and submits. */
     private fun fillEbonePasswordAndSubmit() {
         val newPassword = if (manualAction == "SUSPEND") EBONE_SUSPEND_PASSWORD else EBONE_ENABLE_PASSWORD
-        // Disable Chrome/WebView autofill on this page specifically — a
-        // previously-saved password autofilling into the field AFTER our
-        // script runs is the most likely reason the value doesn't stick.
         webView.settings.saveFormData = false
         webView.postDelayed({
             webView.evaluateJavascript(
@@ -631,9 +846,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                     finishManualActionFailure("Password field not found on Ebone page")
                     return@evaluateJavascript
                 }
-                // Small delay so the site's own JS (validation, autofill
-                // re-check) settles before we click submit, then re-verify
-                // the field still holds our value right before clicking.
                 webView.postDelayed({
                     webView.evaluateJavascript(
                         "(function(){" +
@@ -644,11 +856,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                                 "      inputs[i].dispatchEvent(new Event('input',{bubbles:true}));" +
                                 "    }" +
                                 "  }" +
-                                // Submit the FORM directly instead of clicking
-                                // the button — form.submit() bypasses any
-                                // client-side JS validation (e.g. a blocked
-                                // click handler checking a confirm-password
-                                // field), unlike button.click() which respects it.
                                 "  var form = document.querySelector('form[action*=\"clientChange\"]') || document.querySelector('form');" +
                                 "  if(form){ form.submit(); return 'submitted'; }" +
                                 "  var b = document.querySelector('button[type=submit]');" +
@@ -667,8 +874,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             }
         }, 1200)
     }
-
-    // ===================== WATEEN =====================
 
     private fun searchWateenCustomer(customerId: String) {
         webView.evaluateJavascript(
@@ -703,11 +908,6 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun onWateenProfileOpened() {
-        // NEW: manual SUSPEND/ENABLE — find the "Disable Net"/"Enable Net"
-        // link on the profile and navigate straight to its href. The
-        // jconfirm popup is a client-side UI safety layer on the anchor's
-        // click handler only — the href itself is the real action URL, so
-        // loading it directly performs the disable/enable with no popup.
         if (manualAction != null) {
             val selector = if (manualAction == "SUSPEND")
                 "a.disable-user-connection" else "a.enable-user-connection"
@@ -780,18 +980,11 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    // ===================== EBONE =====================
-
     private fun searchEboneCustomer(customerId: String) {
-        // NEW: manual SUSPEND/ENABLE — skip straight to the password-change
-        // page instead of the normal client profile / renew flow.
         if (manualAction != null) {
             webView.loadUrl("https://partner.ebill.pk/clients/clientChange/$customerId")
             return
         }
-        // Direct URL — fastest and most reliable approach.
-        // If "not found" is returned, it means the customer ID
-        // is wrong/mistyped in Firestore (or doesn't exist in panel).
         webView.loadUrl("https://partner.ebill.pk/clients/client/$customerId")
     }
 
@@ -850,7 +1043,568 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    // ===================== ZONG: FRANCHISE SEARCH =====================
+    private fun fillDealerTopupAmountAndSubmit() {
+        val amount = topupAmount
+        if (amount.isNullOrBlank()) {
+            finishManualActionFailure("No top-up amount was provided")
+            return
+        }
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var inp = document.querySelector('input[name=\"PaidAmt\"]');" +
+                        "  if(!inp) return 'no_amount_field';" +
+                        "  inp.value = '$amount';" +
+                        "  inp.dispatchEvent(new Event('input',{bubbles:true}));" +
+                        "  inp.dispatchEvent(new Event('change',{bubbles:true}));" +
+                        "  return 'filled';" +
+                        "})()"
+            ) { filledResultRaw ->
+                val filledResult = filledResultRaw.trim().removeSurrounding("\"")
+                if (filledResult != "filled") {
+                    finishManualActionFailure("Amount field (PaidAmt) not found on Ebone payment page")
+                    return@evaluateJavascript
+                }
+                webView.postDelayed({
+                    webView.evaluateJavascript(
+                        "(function(){" +
+                                "  var form = document.querySelector('form[action*=\"addbalance\"]') || document.querySelector('form');" +
+                                "  if(form){ form.submit(); return 'submitted'; }" +
+                                "  var b = document.querySelector('button[type=submit]');" +
+                                "  if(b){ b.click(); return 'submitted-via-click'; }" +
+                                "  return 'not_found';" +
+                                "})()"
+                    ) { submitResultRaw ->
+                        val submitResult = submitResultRaw.trim().removeSurrounding("\"")
+                        if (submitResult == "submitted" || submitResult == "submitted-via-click") {
+                            webView.postDelayed({ captureDealerTopupResult() }, 2500)
+                        } else {
+                            finishManualActionFailure("Submit button/form not found on Ebone payment page")
+                        }
+                    }
+                }, 600)
+            }
+        }, 1000)
+    }
+
+    /**
+     * NEW: real Android notification (not a Toast) confirming an
+     * automatic dealer panel transfer completed — in English, naming
+     * the dealer, zone (only shown for non-Okara zones, to keep Okara's
+     * notifications exactly as short as before), panel, and amount.
+     * Stays in the notification shade so the admin can see it even if
+     * they weren't looking at the phone when the auto-transfer ran.
+     */
+    private fun showAdminTransferNotification(dealerName: String, panel: String, zone: String, amount: Double) {
+        val channelId = "dealer_auto_transfer"
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (manager.getNotificationChannel(channelId) == null) {
+                manager.createNotificationChannel(
+                    android.app.NotificationChannel(channelId, "Dealer Auto Transfers", android.app.NotificationManager.IMPORTANCE_HIGH)
+                )
+            }
+        }
+        val zoneLabel = if (zone.equals("Okara", ignoreCase = true)) "" else " ($zone)"
+        val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("Payment auto-transferred")
+            .setContentText("$dealerName$zoneLabel — Rs. ${"%.0f".format(amount)} sent via $panel")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .build()
+        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+        manager.notify(("transfer_$dealerName$zone$panel${System.currentTimeMillis()}").hashCode(), notification)
+    }
+
+    private fun captureDealerTopupResult() {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var b = document.querySelector('.box-body');" +
+                    "  var text = (b ? b.innerText : document.body.innerText) || '';" +
+                    "  var dealerBalance = '';" +
+                    "  var labels = document.querySelectorAll('h5.card-title');" +
+                    "  for (var i=0;i<labels.length;i++){" +
+                    "    if (labels[i].innerText.trim() === 'Dealer Balance'){" +
+                    "      var valEl = labels[i].parentElement ? labels[i].parentElement.querySelector('span.h2') : null;" +
+                    "      if (valEl) dealerBalance = valEl.innerText.trim();" +
+                    "      break;" +
+                    "    }" +
+                    "  }" +
+                    "  return JSON.stringify({text: text.substring(0, 800), url: window.location.href, dealerBalance: dealerBalance});" +
+                    "})()"
+        ) { resultRaw ->
+            var capturedText = ""
+            var dealerBalanceAfter = ""
+            try {
+                val clean = resultRaw
+                    .removeSurrounding("\"")
+                    .replace("\\\"", "\"")
+                    .replace("\\n", " ")
+                    .replace("\\\\", "\\")
+                capturedText = clean
+                val balanceMatch = Regex("\"dealerBalance\":\"(.*?)\"").find(resultRaw)
+                dealerBalanceAfter = balanceMatch?.groupValues?.get(1) ?: ""
+                android.util.Log.d("WebViewLoginActivity", "Dealer top-up result page: $clean")
+                if (dealerBalanceAfter.isNotBlank()) {
+                    android.util.Log.d("WebViewLoginActivity", "Dealer's balance shown on this page after submit: $dealerBalanceAfter")
+                }
+            } catch (_: Exception) {
+            }
+
+            val amountValue = topupAmount?.toDoubleOrNull() ?: 0.0
+            val logEntry = mapOf(
+                "dealerId" to (dealerInternalId ?: ""),
+                "dealerName" to (dealerDisplayName ?: ""),
+                "panel" to selectedIsp,
+                "ispDealerId" to (dealerEboneId ?: ""),
+                "amount" to amountValue,
+                "submittedAt" to System.currentTimeMillis(),
+                "resultText" to capturedText.take(500),
+                "dealerBalanceAfter" to dealerBalanceAfter,
+                "sourceTransactionId" to (sourceTransactionId ?: "")
+            )
+            db.collection("dealerPayments").add(logEntry)
+
+            sourceTransactionId?.let { txId ->
+                if (txId.isNotBlank()) {
+                    db.collection("dealerTransactions").document(txId)
+                        .update(
+                            mapOf(
+                                "transferStatus" to "TRANSFERRED",
+                                "transferredAt" to System.currentTimeMillis(),
+                                "transferResultText" to capturedText.take(500)
+                            )
+                        )
+                }
+            }
+
+            // TEMPORARILY DISABLED per explicit request: an earlier
+            // notification (full-screen-intent version) was tap-
+            // triggering a duplicate panel transfer. Disabling this
+            // popup as a precaution while that is fixed properly — the
+            // actual transfer above already completed successfully and
+            // is completely unaffected by this popup being off.
+            // showAdminTransferNotification(dealerDisplayName ?: "Dealer", selectedIsp, targetZone, amountValue)
+
+            val balanceNote = if (dealerBalanceAfter.isNotBlank())
+                "Dealer's balance now shows: $dealerBalanceAfter. " else ""
+            Toast.makeText(
+                this,
+                "Submitted. $balanceNote" +
+                        "Refreshing franchise balance…",
+                Toast.LENGTH_LONG
+            ).show()
+            setResult(RESULT_OK, Intent().apply {
+                putExtra("dealer_topup_submitted", true)
+            })
+
+            manualAction = "CHECK_BALANCE"
+            when (selectedIsp) {
+                "EBONE" -> {
+                    eboneBalanceCheckAttempted = false
+                    webView.postDelayed({ readEboneFranchiseBalance() }, 1000)
+                }
+                "WATEEN" -> {
+                    wateenBalanceCheckAttempted = false
+                    webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/") }, 600)
+                }
+                "ZONG" -> {
+                    zongBalanceCheckAttempted = false
+                    webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/") }, 600)
+                }
+                else -> finish()
+            }
+        }
+    }
+
+    private fun readEboneFranchiseBalance(attempt: Int = 1) {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var footer = document.querySelector('.dropdown-menu li.footer');" +
+                    "  var text = footer ? footer.innerText : '';" +
+                    "  if (text && text.indexOf('Balance') > -1) {" +
+                    "    return JSON.stringify({text:text, clicked:false});" +
+                    "  }" +
+                    "  var icon = document.querySelector('i.fa-dollar');" +
+                    "  var link = icon ? icon.closest('a') : null;" +
+                    "  if (link) { link.click(); }" +
+                    "  return JSON.stringify({text:'', clicked: !!link});" +
+                    "})()"
+        ) { resultRaw ->
+            try {
+                val clean = resultRaw
+                    .removeSurrounding("\"")
+                    .replace("\\\"", "\"")
+                    .replace("\\n", " ")
+                    .replace("\\\\", "\\")
+                val textMatch = Regex("\"text\":\"(.*?)\",\"clicked\"").find(clean)
+                val text = textMatch?.groupValues?.get(1) ?: ""
+                val clicked = clean.contains("\"clicked\":true")
+
+                if (text.isNotBlank()) {
+                    val balanceMatch = Regex("Balance:\\s*(-?[0-9.,]+)").find(text)
+                    val balance = balanceMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+                    if (balance != null) {
+                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { _ ->
+                            FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone)
+                        }
+                        Toast.makeText(this, "Ebone balance: $balance", Toast.LENGTH_LONG).show()
+                        setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
+                        finish()
+                        return@evaluateJavascript
+                    }
+                }
+
+                if (clicked && attempt < 3) {
+                    webView.postDelayed({ readEboneFranchiseBalance(attempt + 1) }, 700)
+                } else {
+                    finishManualActionFailure("Could not read the franchise balance dropdown on Ebone")
+                }
+            } catch (e: Exception) {
+                if (attempt < 3) {
+                    webView.postDelayed({ readEboneFranchiseBalance(attempt + 1) }, 700)
+                } else {
+                    finishManualActionFailure("Could not read the franchise balance dropdown: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun searchWateenDealer(searchTerm: String) {
+        if (searchTerm.isBlank()) {
+            finishManualActionFailure("No search term was provided")
+            return
+        }
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var inp = document.querySelector('input[aria-controls=\"dtAllDealers\"]');" +
+                    "  if(inp){" +
+                    "    inp.focus();" +
+                    "    inp.value = '$searchTerm';" +
+                    "    inp.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "    inp.dispatchEvent(new Event('keyup',{bubbles:true}));" +
+                    "    return 'search_box_found';" +
+                    "  }" +
+                    "  return 'search_box_not_found';" +
+                    "})()"
+        ) { searchResultRaw ->
+            val searchResult = searchResultRaw.trim().removeSurrounding("\"")
+            if (searchResult != "search_box_found") {
+                finishManualActionFailure("Dealer search box not found on Wateen dealer list page")
+                return@evaluateJavascript
+            }
+            webView.postDelayed({
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var links = document.querySelectorAll('a[href*=\"/dealer/dealer/view/\"]');" +
+                            "  for (var i=0;i<links.length;i++){" +
+                            "    var row = links[i].closest('tr');" +
+                            "    var rowText = row ? row.innerText : links[i].innerText;" +
+                            "    if (rowText && rowText.toLowerCase().indexOf('$searchTerm'.toLowerCase()) > -1){ return links[i].href; }" +
+                            "  }" +
+                            "  if (links.length === 1) { return links[0].href; }" +
+                            "  return '';" +
+                            "})()"
+                ) { hrefRaw ->
+                    val href = hrefRaw.trim().removeSurrounding("\"")
+                    if (href.isEmpty() || !href.startsWith("http")) {
+                        finishManualActionFailure("Could not find dealer \"$searchTerm\" in the Wateen dealer search results")
+                        return@evaluateJavascript
+                    }
+                    if (manualAction == "FETCH_DEALER_ID") {
+                        val numericId = Regex("""/dealer/dealer/view/(\d+)""").find(href)?.groupValues?.get(1)
+                        if (numericId != null) {
+                            setResult(RESULT_OK, Intent().apply {
+                                putExtra("fetched_dealer_id", numericId)
+                            })
+                            finish()
+                        } else {
+                            finishManualActionFailure("Found a dealer link but could not read its numeric ID")
+                        }
+                    } else {
+                        webView.loadUrl(href)
+                    }
+                }
+            }, 1200)
+        }
+    }
+
+    private fun openWateenPaymentModalAndSubmit(attempt: Int = 1) {
+        val amount = topupAmount
+        if (amount.isNullOrBlank()) {
+            finishManualActionFailure("No top-up amount was provided")
+            return
+        }
+        if (attempt == 1) {
+            Toast.makeText(this, "Step 1/4: Looking for Payment button…", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Step 1/4: Retrying (attempt $attempt)…", Toast.LENGTH_SHORT).show()
+        }
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var els = document.querySelectorAll('.btn-primary');" +
+                    "  for (var i=0;i<els.length;i++){" +
+                    "    if (els[i].innerText.trim() === 'Payment'){ els[i].click(); return 'clicked'; }" +
+                    "  }" +
+                    "  var candidates = [];" +
+                    "  for (var i=0;i<els.length && i<10;i++){ candidates.push(els[i].tagName + ':' + els[i].innerText.trim()); }" +
+                    "  var anyPay = document.querySelectorAll('*');" +
+                    "  var payMatches = [];" +
+                    "  for (var j=0;j<anyPay.length && payMatches.length<5;j++){" +
+                    "    var t = (anyPay[j].innerText || '').trim();" +
+                    "    if (t.length>0 && t.length<25 && t.toLowerCase().indexOf('payment')>-1 && anyPay[j].children.length===0){" +
+                    "      payMatches.push(anyPay[j].tagName + ':' + anyPay[j].className + ':' + t);" +
+                    "    }" +
+                    "  }" +
+                    "  return 'not_found|' + JSON.stringify(candidates) + '|' + JSON.stringify(payMatches);" +
+                    "})()"
+        ) { clickResultRaw ->
+            val clickResult = clickResultRaw.trim().removeSurrounding("\"")
+            if (clickResult != "clicked") {
+                if (attempt < 3) {
+                    webView.postDelayed({ openWateenPaymentModalAndSubmit(attempt + 1) }, 1500)
+                    return@evaluateJavascript
+                }
+                val parts = clickResult.split("|")
+                val btnPrimaryTexts = parts.getOrNull(1)?.replace("\\\"", "\"") ?: "[]"
+                val paymentMatches = parts.getOrNull(2)?.replace("\\\"", "\"") ?: "[]"
+                android.util.Log.d("WebViewLoginActivity", "Payment button not found after $attempt attempts. .btn-primary texts on page: $btnPrimaryTexts")
+                android.util.Log.d("WebViewLoginActivity", "Elements containing 'payment' text: $paymentMatches")
+                Toast.makeText(
+                    this,
+                    "Payment button not found (after $attempt tries). Buttons: $btnPrimaryTexts. 'payment' text found: $paymentMatches",
+                    Toast.LENGTH_LONG
+                ).show()
+                finishManualActionFailure("Payment button not found on Wateen dealer profile — see previous toast/Logcat for what's actually on the page")
+                return@evaluateJavascript
+            }
+            Toast.makeText(this, "Step 2/4: Payment button clicked — opening modal & filling amount…", Toast.LENGTH_SHORT).show()
+            webView.postDelayed({
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var sel = document.querySelector('select.paymentmethod[name=\"paymentmethod\"]');" +
+                            "  var amt = document.querySelector('input.amount[name=\"amount\"]');" +
+                            "  if(!sel || !amt) return 'fields_not_found';" +
+                            "  sel.value = '7';" +
+                            "  sel.dispatchEvent(new Event('change',{bubbles:true}));" +
+                            "  amt.value = '$amount';" +
+                            "  amt.dispatchEvent(new Event('input',{bubbles:true}));" +
+                            "  amt.dispatchEvent(new Event('change',{bubbles:true}));" +
+                            "  var note = document.querySelector('input.other[name=\"other\"]');" +
+                            "  if(note){" +
+                            "    note.value = 'Online Payment';" +
+                            "    note.dispatchEvent(new Event('input',{bubbles:true}));" +
+                            "    note.dispatchEvent(new Event('change',{bubbles:true}));" +
+                            "  }" +
+                            "  return 'filled';" +
+                            "})()"
+                ) { fillResultRaw ->
+                    val fillResult = fillResultRaw.trim().removeSurrounding("\"")
+                    if (fillResult != "filled") {
+                        finishManualActionFailure("Payment method/amount fields not found in Wateen payment modal (modal may not have opened — Step 1 said clicked, but modal fields aren't there)")
+                        return@evaluateJavascript
+                    }
+                    Toast.makeText(this, "Step 3/4: Fields filled — clicking Add Payment…", Toast.LENGTH_SHORT).show()
+                    webView.postDelayed({
+                        webView.evaluateJavascript(
+                            "(function(){" +
+                                    "  var buttons = document.querySelectorAll('button[type=submit].btn-primary');" +
+                                    "  for (var i=0;i<buttons.length;i++){" +
+                                    "    if (buttons[i].innerText.indexOf('Add Payment') > -1){ buttons[i].click(); return 'submitted'; }" +
+                                    "  }" +
+                                    "  if (buttons.length === 1){ buttons[0].click(); return 'submitted'; }" +
+                                    "  return 'not_found';" +
+                                    "})()"
+                        ) { submitResultRaw ->
+                            val submitResult = submitResultRaw.trim().removeSurrounding("\"")
+                            if (submitResult == "submitted") {
+                                Toast.makeText(this, "Step 4/4: Submitted — checking dealer balance…", Toast.LENGTH_SHORT).show()
+                                webView.postDelayed({ captureDealerTopupResult() }, 2500)
+                            } else {
+                                finishManualActionFailure("Add Payment button not found in Wateen payment modal")
+                            }
+                        }
+                    }, 600)
+                }
+            }, 800)
+        }
+    }
+
+    private fun readWateenFranchiseBalance() {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var labels = document.querySelectorAll('h5.card-title');" +
+                    "  for (var i=0;i<labels.length;i++){" +
+                    "    if (labels[i].innerText.trim() === 'My Balance'){" +
+                    "      var valEl = labels[i].parentElement ? labels[i].parentElement.querySelector('span.h2') : null;" +
+                    "      if (valEl) return valEl.innerText.trim();" +
+                    "    }" +
+                    "  }" +
+                    "  return '';" +
+                    "})()"
+        ) { resultRaw ->
+            val text = resultRaw.trim().removeSurrounding("\"")
+            val balance = text.replace(",", "").toDoubleOrNull()
+            if (balance != null) {
+                FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) { _ ->
+                    FranchiseBalanceManager.checkAndNotifyLowBalance(this, "WATEEN", balance, targetZone)
+                }
+                Toast.makeText(this, "Wateen balance: $balance", Toast.LENGTH_LONG).show()
+                setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
+                finish()
+            } else {
+                finishManualActionFailure("Could not find the Wateen \"My Balance\" card on this page")
+            }
+        }
+    }
+
+    private fun searchAndCreditZongDealer(searchTerm: String, amount: String) {
+        if (searchTerm.isBlank() || amount.isBlank()) {
+            finishManualActionFailure("Missing dealer name or amount for Zong top-up")
+            return
+        }
+        Toast.makeText(this, "Step 1/4: Searching for dealer on Sub-Dealers page…", Toast.LENGTH_SHORT).show()
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var inp = document.querySelector('input[aria-controls=\"table3\"]');" +
+                    "  if(!inp) return 'search_box_not_found';" +
+                    "  inp.focus();" +
+                    "  inp.value = '$searchTerm';" +
+                    "  inp.dispatchEvent(new Event('input',{bubbles:true}));" +
+                    "  inp.dispatchEvent(new Event('keyup',{bubbles:true}));" +
+                    "  return 'search_box_found';" +
+                    "})()"
+        ) { searchResultRaw ->
+            val searchResult = searchResultRaw.trim().removeSurrounding("\"")
+            if (searchResult != "search_box_found") {
+                finishManualActionFailure("Dealer search box not found on Zong Sub-Dealers page")
+                return@evaluateJavascript
+            }
+            Toast.makeText(this, "Step 2/4: Waiting for search results to filter…", Toast.LENGTH_SHORT).show()
+            webView.postDelayed({
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var icons = document.querySelectorAll('i.mdi-plus');" +
+                            "  var matches = [];" +
+                            "  for (var i=0;i<icons.length;i++){" +
+                            "    var row = icons[i].closest('tr');" +
+                            "    var rowText = row ? row.innerText : '';" +
+                            "    if (rowText.toLowerCase().indexOf('$searchTerm'.toLowerCase()) > -1){" +
+                            "      matches.push({icon:i, rowText: rowText.substring(0,80)});" +
+                            "    }" +
+                            "  }" +
+                            "  if (matches.length !== 1){" +
+                            "    return JSON.stringify({status:'ambiguous', count: matches.length, totalIcons: icons.length});" +
+                            "  }" +
+                            "  var link = icons[matches[0].icon].closest('a');" +
+                            "  if (!link) return JSON.stringify({status:'no_link'});" +
+                            "  var target = link.getAttribute('data-target');" +
+                            "  if (!target){ return JSON.stringify({status:'no_target'}); }" +
+                            "  link.click();" +
+                            "  return JSON.stringify({status:'clicked', rowText: matches[0].rowText, modalSelector: target});" +
+                            "})()"
+                ) { clickResultRaw ->
+                    val clean = clickResultRaw
+                        .removeSurrounding("\"")
+                        .replace("\\\"", "\"")
+                    val status = Regex("\"status\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                    if (status != "clicked") {
+                        val countInfo = Regex("\"count\":(\\d+)").find(clean)?.groupValues?.get(1) ?: "?"
+                        val totalInfo = Regex("\"totalIcons\":(\\d+)").find(clean)?.groupValues?.get(1) ?: "?"
+                        finishManualActionFailure(
+                            "Could not open a single confirmed dealer modal for \"$searchTerm\" " +
+                                    "(status=$status, $countInfo/$totalInfo matches). " +
+                                    "Stopped WITHOUT crediting anyone."
+                        )
+                        return@evaluateJavascript
+                    }
+                    val matchedRowText = Regex("\"rowText\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                    val modalSelector = Regex("\"modalSelector\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                    if (modalSelector.isBlank()) {
+                        finishManualActionFailure("Could not determine which dealer's modal opened — stopped WITHOUT crediting anyone.")
+                        return@evaluateJavascript
+                    }
+                    Toast.makeText(this, "Step 3/4: Opened modal \"$modalSelector\" for row: $matchedRowText — filling amount…", Toast.LENGTH_LONG).show()
+                    webView.postDelayed({
+                        webView.evaluateJavascript(
+                            "(function(){" +
+                                    "  var modal = document.querySelector('$modalSelector');" +
+                                    "  if(!modal) return JSON.stringify({status:'modal_not_found'});" +
+                                    "  var amt = modal.querySelector('input[name=\"credit_amount\"]');" +
+                                    "  if(!amt) return JSON.stringify({status:'amount_not_found'});" +
+                                    "  amt.value = '$amount';" +
+                                    "  amt.dispatchEvent(new Event('input',{bubbles:true}));" +
+                                    "  amt.dispatchEvent(new Event('change',{bubbles:true}));" +
+                                    "  var modalText = modal.innerText.substring(0,300);" +
+                                    "  return JSON.stringify({status:'filled', modalText: modalText});" +
+                                    "})()"
+                        ) { fillResultRaw ->
+                            val fillClean = fillResultRaw.removeSurrounding("\"").replace("\\\"", "\"")
+                            if (!fillClean.contains("\"status\":\"filled\"")) {
+                                finishManualActionFailure("Amount field not found inside modal $modalSelector — stopped WITHOUT crediting anyone.")
+                                return@evaluateJavascript
+                            }
+                            val modalText = Regex("\"modalText\":\"(.*?)\"").find(fillClean)?.groupValues?.get(1) ?: ""
+                            android.util.Log.d("WebViewLoginActivity", "Zong credit — modal=$modalSelector row=\"$matchedRowText\" modalShows=\"$modalText\"")
+
+                            // NOTE: manual confirmation dialog removed
+                            // per explicit admin request — auto-submits
+                            // now, relying entirely on the exact-single-
+                            // row-match + modal-scoping checks above for
+                            // safety. Admin has been informed of the
+                            // risk and will manually test with small
+                            // amounts.
+                            Toast.makeText(this, "Step 4/4: Submitting credit for \"$searchTerm\"…", Toast.LENGTH_SHORT).show()
+                            webView.evaluateJavascript(
+                                "(function(){" +
+                                        "  var modal = document.querySelector('$modalSelector');" +
+                                        "  if(!modal) return 'modal_not_found';" +
+                                        "  var btn = modal.querySelector('button[name=\"doNewCredit\"]');" +
+                                        "  if(btn){ btn.click(); return 'submitted'; }" +
+                                        "  return 'not_found';" +
+                                        "})()"
+                            ) { submitResultRaw ->
+                                val submitResult = submitResultRaw.trim().removeSurrounding("\"")
+                                if (submitResult == "submitted") {
+                                    webView.postDelayed({ captureDealerTopupResult() }, 2500)
+                                } else {
+                                    finishManualActionFailure("Credit Account button not found inside modal $modalSelector")
+                                }
+                            }
+                        }
+                    }, 800)
+                }
+            }, 1800)
+        }
+    }
+
+    private fun readZongFranchiseBalance() {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var btns = document.querySelectorAll('button.btn-success');" +
+                    "  for (var i=0;i<btns.length;i++){" +
+                    "    var t = btns[i].innerText || '';" +
+                    "    var m = t.match(/Available Credit Rs\\.?\\s*([0-9,]+)/i);" +
+                    "    if (m) return m[1];" +
+                    "  }" +
+                    "  return '';" +
+                    "})()"
+        ) { resultRaw ->
+            val text = resultRaw.trim().removeSurrounding("\"")
+            val balance = text.replace(",", "").toDoubleOrNull()
+            if (balance != null) {
+                FranchiseBalanceManager.updateBalance("ZONG", balance, targetZone) { _ ->
+                    FranchiseBalanceManager.checkAndNotifyLowBalance(this, "ZONG", balance, targetZone)
+                }
+                Toast.makeText(this, "Zong balance: $balance", Toast.LENGTH_LONG).show()
+                setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
+                finish()
+            } else {
+                finishManualActionFailure("Could not find the Zong \"Available Credit\" button on this page")
+            }
+        }
+    }
 
     private fun searchZongCustomer(customerId: String) {
         webView.evaluateJavascript(
@@ -904,8 +1658,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         }, 1000)
     }
 
-    // ===================== ZONG: SWITCH TO DEALER PANEL =====================
-
     private fun switchToZongDealerPanel(dealerName: String) {
         val prefs = EncryptedSharedPreferences.create(
             this, "isp_panel_prefs",
@@ -953,14 +1705,7 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    // ===================== ZONG: DEALER PANEL - ACTIVATE / SUSPEND / ENABLE =====================
-
     private fun onZongProfileOpened() {
-        // NEW: manual SUSPEND/ENABLE — find the actionx=Disable/Enable
-        // link that's currently visible on the profile (only one of the
-        // two is shown at a time, depending on current status) and
-        // navigate to it directly. The token in the URL is generated
-        // fresh per page load, so it must be read live — never hardcoded.
         if (manualAction != null) {
             webView.evaluateJavascript(
                 "(function(){" +
@@ -975,11 +1720,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             ) { hrefRaw ->
                 val href = hrefRaw.trim().removeSurrounding("\"")
                 if (href.isNotEmpty() && href.startsWith("http")) {
-                    // Whatever the link currently says (Disable or Enable)
-                    // reflects the customer's CURRENT state and toggles it —
-                    // matches what we asked for either way, since a
-                    // suspended customer only shows an Enable link and
-                    // vice versa.
                     webView.postDelayed({ webView.loadUrl(href) }, 300)
                     webView.postDelayed({ finishManualActionSuccess() }, 2500)
                 } else {
@@ -1087,10 +1827,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val address = Regex("\"address\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
                 val phone = normalizePakPhone(Regex("\"phone\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: "")
 
-                // The Bio-Data table (Address/Mobile) can render slightly
-                // after the initial page paint (User ID area loads first).
-                // Retry a few times before settling for whatever we have,
-                // instead of finishing early with incomplete data.
                 val incomplete = address.isEmpty() || phone.isEmpty()
                 if (incomplete && attempt < 4) {
                     webView.postDelayed({ fetchZongCustomerDetails(attempt + 1) }, 1200)
@@ -1115,10 +1851,6 @@ class WebViewLoginActivity : AppCompatActivity() {
     private fun fetchEboneCustomerDetails(attempt: Int = 1) {
         if (eboneDetailsFetchDone) return
 
-        // Safety check: confirm the page actually loaded the customer we
-        // asked for before reading anything off it. If the panel silently
-        // redirected elsewhere (invalid ID, session hiccup, etc.), we must
-        // NOT return data — it would belong to the wrong customer.
         val expectedId = autoActivateCustomerId
         if (expectedId != null) {
             val currentUrl = webView.url ?: ""
@@ -1133,8 +1865,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                     "Ebone details fetch: URL customer ($urlCustomerId) does not match requested ($expectedId) — aborting to avoid wrong data."
                 )
                 if (attempt < 3) {
-                    // Page may still be mid-navigation — give it a moment
-                    // and check again before giving up.
                     webView.postDelayed({ fetchEboneCustomerDetails(attempt + 1) }, 1000)
                 } else {
                     finishManualActionFailure("Could not load the requested customer's profile (Ebone showed a different customer)")
@@ -1174,10 +1904,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val address = Regex("\"address\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
                 val phone = normalizePakPhone(Regex("\"phone\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: "")
 
-                // Second safety check: the userId actually READ off the
-                // page must match what we asked for too — catches cases
-                // where the URL matched but the table itself (e.g. a
-                // cached DOM fragment) belongs to a different customer.
                 if (expectedId != null && userId.isNotEmpty() && !userId.equals(expectedId, ignoreCase = true)) {
                     android.util.Log.e(
                         "WebViewLoginActivity",
@@ -1191,10 +1917,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                     return@evaluateJavascript
                 }
 
-                // The Ebone profile table can render a beat after the page
-                // reports "finished" — retry a few times before settling
-                // for whatever we have, instead of finishing with a
-                // half-filled form.
                 val incomplete = address.isEmpty() || phone.isEmpty()
                 if (incomplete && attempt < 4) {
                     webView.postDelayed({ fetchEboneCustomerDetails(attempt + 1) }, 1000)
@@ -1241,7 +1963,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         webView.evaluateJavascript(script) { result -> handleFetchResult(result) }
     }
 
-    /** Converts "+923034507600" → "03034507600" (Pakistan local format). */
     private fun normalizePakPhone(raw: String): String {
         var p = raw.trim().replace(" ", "").replace("-", "")
         return when {

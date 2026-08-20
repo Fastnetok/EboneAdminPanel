@@ -19,50 +19,140 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         private const val PREFS_FILE = "isp_panel_prefs"
         private const val KEY_ACCOUNTS = "all_accounts_json"
 
-        fun getSavedUsername(context: Context, isp: String): String? {
+        // NEW: master override password for the "delete account" confirmation
+        // dialog. If the admin forgets the actual saved ISP panel password
+        // (e.g. it was typed into ISP Panel Settings and never written down
+        // anywhere else), this fixed code also confirms deletion — so the
+        // admin is never locked out of removing a wrong/duplicate entry
+        // just because they forgot that specific password. Kept separate
+        // from any per-account password; entering EITHER the real saved
+        // password OR this code deletes the entry.
+        private const val MASTER_OVERRIDE_PASSWORD = "1912"
+
+        /** NEW: entries saved before zones existed have no "zone" field
+         * at all — treat those as "Okara" so nothing breaks for
+         * existing accounts. */
+        private fun accountZone(obj: JSONObject): String = obj.optString("zone", "Okara").ifBlank { "Okara" }
+
+        /**
+         * NEW: zone-aware lookup — [zone] defaults to "Okara" for any
+         * caller that hasn't been updated to pass a real zone yet.
+         * Priority order:
+         *   1. Non-dealer account matching BOTH isp AND zone exactly
+         *      (e.g. Zong + Renala → RN-Abbas046)
+         *   2. Dealer account matching BOTH isp AND zone
+         *   3. ONLY when [zone] == "Okara" (the legacy/default zone):
+         *      fall back to any non-dealer account for that isp,
+         *      regardless of its saved zone — keeps old single-zone
+         *      setups (accounts saved before zones existed) working.
+         *
+         * CRITICAL: for any OTHER explicitly-requested zone (Renala,
+         * etc.), there is NO cross-zone fallback — if no exact match
+         * exists, this returns null so the caller can fail clearly
+         * instead of silently logging in with the WRONG franchise's
+         * credentials. A previous version of this fallback caused a
+         * real incident: Renala was requested, no Renala-tagged Zong
+         * account was found (likely saved with the Zone dropdown left
+         * on its default), and the code silently fell back to Okara's
+         * account — logging into the wrong franchise without any
+         * warning.
+         */
+        fun getSavedUsername(context: Context, isp: String, zone: String = "Okara"): String? {
+            val arr = safeAccountsArray(context) ?: return null
+            // Pass 1: non-dealer, exact isp+zone match
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false) && accountZone(obj) == zone) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { /* skip this one malformed entry, keep scanning */ }
+            }
+            // Pass 2: dealer account, exact isp+zone match
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp && accountZone(obj) == zone) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { /* skip */ }
+            }
+            // Pass 3: only for the legacy default zone — any non-dealer
+            // account for that isp regardless of its saved zone.
+            if (zone.equals("Okara", ignoreCase = true)) {
+                for (i in 0 until arr.length()) {
+                    try {
+                        val obj = arr.getJSONObject(i)
+                        if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false)) {
+                            return obj.getString("username")
+                        }
+                    } catch (_: Exception) { /* skip */ }
+                }
+            }
+            return null
+        }
+
+        fun getSavedPassword(context: Context, isp: String, zone: String = "Okara"): String? {
+            val arr = safeAccountsArray(context) ?: return null
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false) && accountZone(obj) == zone) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
+            }
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp && accountZone(obj) == zone) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
+            }
+            if (zone.equals("Okara", ignoreCase = true)) {
+                for (i in 0 until arr.length()) {
+                    try {
+                        val obj = arr.getJSONObject(i)
+                        if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false)) {
+                            return obj.getString("password")
+                        }
+                    } catch (_: Exception) { }
+                }
+            }
+            return null
+        }
+
+        private fun safeAccountsArray(context: Context): JSONArray? {
             return try {
                 val json = getPrefs(context).getString(KEY_ACCOUNTS, null) ?: return null
-                val arr = JSONArray(json)
-                // Step 1: Non-Dealer Account Pehle
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp &&
-                        !obj.optBoolean("isDealer", false)) {
-                        return obj.getString("username")
-                    }
-                }
-                // Step 2: Dealer Account Bhi Try Karein
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp) {
-                        return obj.getString("username")
-                    }
-                }
-                null
+                JSONArray(json)
             } catch (_: Exception) { null }
         }
 
-        fun getSavedPassword(context: Context, isp: String): String? {
-            return try {
-                val json = getPrefs(context).getString(KEY_ACCOUNTS, null) ?: return null
-                val arr = JSONArray(json)
-                // Step 1: Non-Dealer Account Pehle
-                for (i in 0 until arr.length()) {
+        /** NEW: diagnostic-only — lists every saved account's isp/zone
+         * (and dealer name if applicable) as plain text, so a "no login
+         * found for zone X" failure can show exactly what IS actually
+         * stored instead of leaving the admin guessing. Never throws;
+         * skips any single entry it can't read. */
+        fun debugListAccounts(context: Context): String {
+            val arr = safeAccountsArray(context) ?: return "(no accounts saved)"
+            val parts = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp &&
-                        !obj.optBoolean("isDealer", false)) {
-                        return obj.getString("password")
-                    }
+                    val isp = obj.optString("isp", "?")
+                    val zone = accountZone(obj)
+                    val isDealer = obj.optBoolean("isDealer", false)
+                    val dealerName = obj.optString("dealerName", "")
+                    parts.add(
+                        if (isDealer) "$isp/$zone(dealer:$dealerName)" else "$isp/$zone"
+                    )
+                } catch (_: Exception) {
+                    parts.add("(unreadable entry #$i)")
                 }
-                // Step 2: Dealer Account Bhi Try Karein
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp) {
-                        return obj.getString("password")
-                    }
-                }
-                null
-            } catch (_: Exception) { null }
+            }
+            return if (parts.isEmpty()) "(no accounts saved)" else parts.joinToString(", ")
         }
 
         private fun getPrefs(context: Context) =
@@ -127,6 +217,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             val username = obj.getString("username")
             val dealerName = obj.optString("dealerName", "")
             val isDealer = obj.optBoolean("isDealer", false)
+            // NEW: zone tag — old entries without this field default to
+            // "Okara" so nothing looks different until re-saved.
+            val zone = obj.optString("zone", "Okara").ifBlank { "Okara" }
             val portalUrl = getPortalUrl(isp)
 
             val row = LinearLayout(this).apply {
@@ -149,8 +242,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
             val title = TextView(this).apply {
                 text = if (isDealer && dealerName.isNotEmpty())
-                    "$dealerName (Dealer) · $isp"
-                else isp
+                    "$dealerName (Dealer) · $isp · $zone"
+                else "$isp · $zone"
                 textSize = 14f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 setTextColor(android.graphics.Color.parseColor("#0D2E5C"))
@@ -225,7 +318,13 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                             .setView(container)
                             .setPositiveButton("Delete") { _, _ ->
                                 val enteredPassword = passwordInput.text.toString()
-                                if (enteredPassword == password) {
+                                // NEW: accept EITHER the account's own saved
+                                // password OR the fixed master override
+                                // password — so a forgotten panel password
+                                // never blocks removing a wrong/duplicate
+                                // ISP Panel Settings entry.
+                                if (enteredPassword == password ||
+                                    enteredPassword == MASTER_OVERRIDE_PASSWORD) {
                                     val arr = getAccounts()
                                     val newArr = JSONArray()
                                     for (j in 0 until arr.length()) {
@@ -267,6 +366,18 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
         val ispOptions = arrayOf("EBONE", "WATEEN", "ZONG")
 
+        // NEW: zone spinner — which franchise this login belongs to
+        // (Okara/Renala/etc). Keep this list in sync with
+        // DealerPanelActivity's zoneNames as new franchises come online.
+        val zoneOptions = arrayOf("Okara", "Renala")
+        val zoneLabel = TextView(this).apply {
+            text = "Zone (Franchise)"
+            textSize = 13f
+            setTextColor(android.graphics.Color.parseColor("#757575"))
+        }
+        val zoneSpinner = Spinner(this)
+        zoneSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, zoneOptions)
+
         val ispLabel = TextView(this).apply {
             text = "Select ISP"
             textSize = 13f
@@ -305,6 +416,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         }
         updateHints("EBONE")
 
+        layout.addView(zoneLabel)
+        layout.addView(zoneSpinner)
         layout.addView(ispLabel)
         layout.addView(ispSpinner)
         if (isDealer) layout.addView(etDealerName)
@@ -316,6 +429,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             .setView(layout)
             .setPositiveButton("Save & Login") { _, _ ->
                 val isp = ispSpinner.selectedItem.toString()
+                val zone = zoneSpinner.selectedItem.toString()
                 val dealerName = etDealerName.text.toString().trim()
                 val username = etUsername.text.toString().trim()
                 val password = etPassword.text.toString()
@@ -331,6 +445,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
                 val obj = JSONObject().apply {
                     put("isp", isp)
+                    put("zone", zone)
                     put("username", username)
                     put("password", password)
                     put("isDealer", isDealer)

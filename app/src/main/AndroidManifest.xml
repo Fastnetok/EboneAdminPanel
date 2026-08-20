@@ -6,6 +6,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- NEW: required so the auto-payment-transfer notification can
+         reliably launch WebViewLoginActivity even when the app is in
+         the background (bypasses Android 10+'s background-activity-
+         start restriction, which was silently blocking automatic
+         transfers and causing payments to stay PENDING until a manual
+         refresh). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <uses-feature
         android:name="android.hardware.telephony"
@@ -136,6 +143,17 @@
         <activity
             android:name=".DealerMenuActivity"
             android:exported="false" />
+
+        <!-- NEW: permanent "Send Dealer Payment" screen (Dealer →
+             Company → Amount → Send), replacing the earlier temporary
+             test-topup dialog. Also used for the "Send Now" action on
+             SMS-verified pending payments (pre-filled + locked). -->
+        <activity android:name=".SendDealerPaymentActivity" android:exported="false" />
+
+        <!-- NEW: Payment Log / transaction history screen — reads our
+             own "dealerPayments" log with This Month / Last Month /
+             Custom date-range filters. -->
+        <activity android:name=".DealerPaymentLogActivity" android:exported="false" />
 
         <service
             android:name=".PaymentActivationService"

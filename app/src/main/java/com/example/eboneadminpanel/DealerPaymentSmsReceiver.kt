@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Calendar
 
@@ -16,10 +15,12 @@ import java.util.Calendar
  * matching bank/wallet SMS on the ADMIN'S phone (that's where the SMS
  * actually arrives, since the dealer paid INTO the admin's account).
  *
- * On a match: fully automatic — no admin tap required. The dealer's
- * balance (wateenBalance/eboneBalance/zongBalance, based on which panel
- * they picked) is credited immediately and the transaction is marked
- * VERIFIED.
+ * On a match: fully automatic — no admin tap required. This is safe to
+ * auto-credit immediately because a live BroadcastReceiver, by
+ * definition, only ever fires for an SMS arriving RIGHT NOW — so every
+ * match found here is always "today". Matches found by scanning OLDER
+ * SMS (DealerPaymentSmsScanner) are handled more cautiously — see that
+ * file's NEEDS_REVIEW logic.
  */
 class DealerPaymentSmsReceiver : BroadcastReceiver() {
 
@@ -181,46 +182,26 @@ class DealerPaymentSmsReceiver : BroadcastReceiver() {
 
     private fun amountsClose(a: Double, b: Double): Boolean = Math.abs(a - b) < 1.0
 
-    /** Marks the transaction VERIFIED and atomically credits the dealer's
-     * balance for whichever panel (Wateen/Ebone/Zong) they selected —
-     * fully automatic, no admin tap needed. */
+    /** Marks the transaction VERIFIED and credits the dealer's balance —
+     * safe to do immediately here because this whole receiver only ever
+     * runs for an SMS arriving live, right now (i.e. always "today"). */
     private fun creditDealer(context: Context, txnId: String, txnData: Map<String, Any>) {
-        val dealerId = txnData["dealerId"] as? String ?: return
-        val panel = (txnData["panel"] as? String)?.uppercase() ?: return
-        val amount = (txnData["amount"] as? Number)?.toDouble() ?: return
-
-        val balanceField = when (panel) {
-            "WATEEN" -> "wateenBalance"
-            "EBONE" -> "eboneBalance"
-            "ZONG" -> "zongBalance"
-            else -> {
-                Log.w("DealerPaymentSmsReceiver", "Unknown panel '$panel' — cannot credit balance")
-                return
+        DealerPaymentVerifier.verifyAndCredit(context, txnId, txnData) { success ->
+            if (success) {
+                val panel = (txnData["panel"] as? String)?.uppercase() ?: "?"
+                val amount = (txnData["amount"] as? Number)?.toDouble() ?: 0.0
+                val dealerId = txnData["dealerId"] as? String ?: ""
+                Log.d("DealerPaymentSmsReceiver", "Credited Rs.$amount to $dealerId ($panel)")
+                // TEMPORARILY DISABLED per explicit request: tapping this
+                // notification was re-triggering the panel transfer,
+                // causing a DUPLICATE payment to the dealer. The credit
+                // + auto-transfer logic above is completely unaffected —
+                // only this popup is off for now until the underlying
+                // notification-tap issue is fixed properly.
+                // DealerPaymentNotificationHelper.showCreditedNotification(context, dealerId, panel, amount)
+            } else {
+                Log.e("DealerPaymentSmsReceiver", "Balance credit failed for txn $txnId")
             }
         }
-
-        val db = FirebaseFirestore.getInstance()
-        val batch = db.batch()
-
-        batch.update(
-            db.collection("dealerTransactions").document(txnId),
-            mapOf(
-                "status" to "VERIFIED",
-                "verifiedAt" to System.currentTimeMillis()
-            )
-        )
-        batch.update(
-            db.collection("dealers").document(dealerId),
-            balanceField, FieldValue.increment(amount)
-        )
-
-        batch.commit()
-            .addOnSuccessListener {
-                Log.d("DealerPaymentSmsReceiver", "Credited Rs.$amount to $dealerId ($balanceField)")
-                DealerPaymentNotificationHelper.showCreditedNotification(context, dealerId, panel, amount)
-            }
-            .addOnFailureListener { e ->
-                Log.e("DealerPaymentSmsReceiver", "Balance credit failed", e)
-            }
     }
 }
