@@ -34,84 +34,162 @@ import com.google.firebase.firestore.SetOptions
 object FranchiseBalanceManager {
 
     private val doc by lazy {
-        FirebaseFirestore.getInstance().collection("franchiseSettings").document("balances")
+        FirebaseFirestore.getInstance()
+            .collection("franchiseSettings")
+            .document("balances")
     }
 
     private fun panelKey(panel: String) = panel.trim().lowercase()
 
-    /** NEW: "Okara" (the default/original zone) keeps the plain field
-     * name for full backward compatibility with the dashboard chips and
-     * threshold settings already built. Any other zone gets its name
-     * appended, e.g. "zongBalance_Renala". */
+    /** "Okara" keeps the original field name for backward compatibility.
+     * Other zones get the zone name appended. */
     private fun balanceField(panel: String, zone: String): String {
         val base = "${panelKey(panel)}Balance"
-        return if (zone.equals("Okara", ignoreCase = true)) base else "${base}_$zone"
+        return if (zone.equals("Okara", ignoreCase = true)) {
+            base
+        } else {
+            "${base}_$zone"
+        }
     }
 
+    /** "Okara" keeps the original threshold field.
+     * Other zones use their own threshold when configured. */
     private fun thresholdField(panel: String, zone: String): String {
         val base = "${panelKey(panel)}LowBalanceThreshold"
-        return if (zone.equals("Okara", ignoreCase = true)) base else "${base}_$zone"
+        return if (zone.equals("Okara", ignoreCase = true)) {
+            base
+        } else {
+            "${base}_$zone"
+        }
     }
 
     /**
      * Saves the latest known franchise balance for [panel] in [zone].
-     * Call this right after successfully reading the real figure off
-     * the ISP panel (via the readXFranchiseBalance() functions in
-     * WebViewLoginActivity) — never a guess.
+     * This only writes the balance field; thresholds and all other
+     * Firestore settings remain untouched.
      */
-    fun updateBalance(panel: String, balance: Double, zone: String = "Okara", onDone: (Boolean) -> Unit = {}) {
-        doc.set(mapOf(balanceField(panel, zone) to balance), SetOptions.merge())
+    fun updateBalance(
+        panel: String,
+        balance: Double,
+        zone: String = "Okara",
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        doc.set(
+            mapOf(balanceField(panel, zone) to balance),
+            SetOptions.merge()
+        )
             .addOnSuccessListener { onDone(true) }
             .addOnFailureListener { onDone(false) }
     }
 
     /**
-     * Checks [balance] against the admin-configured low-balance
-     * threshold for [panel]/[zone] and fires a local notification if
-     * under it. Safe to call repeatedly — reuses a fixed notification
-     * ID per panel+zone, so it replaces rather than stacks duplicates.
+     * Checks [balance] against the configured low-balance threshold
+     * for [panel]/[zone].
+     *
+     * For non-Okara zones:
+     *   1. Use the zone-specific threshold if it exists.
+     *   2. If it does not exist, fall back to the main panel threshold.
+     *
+     * Example:
+     *   zongLowBalanceThreshold_Renala -> if present, use it.
+     *   Otherwise zongLowBalanceThreshold -> use this value.
+     *
+     * This keeps Renala alerts working with the existing Firestore
+     * configuration and does not require manually adding a new field.
      */
-    fun checkAndNotifyLowBalance(context: Context, panel: String, balance: Double, zone: String = "Okara") {
-        doc.get().addOnSuccessListener { snapshot ->
-            val threshold = snapshot.getDouble(thresholdField(panel, zone)) ?: return@addOnSuccessListener
-            if (threshold <= 0.0) return@addOnSuccessListener // not configured = alerts off
-            if (balance < threshold) {
-                showLowBalanceNotification(context, panel, zone, balance)
+    fun checkAndNotifyLowBalance(
+        context: Context,
+        panel: String,
+        balance: Double,
+        zone: String = "Okara"
+    ) {
+        doc.get()
+            .addOnSuccessListener { snapshot ->
+
+                val zoneThreshold =
+                    snapshot.getDouble(thresholdField(panel, zone))
+
+                val baseThreshold =
+                    snapshot.getDouble("${panelKey(panel)}LowBalanceThreshold")
+
+                val threshold = zoneThreshold ?: baseThreshold
+                ?: return@addOnSuccessListener
+
+                if (threshold <= 0.0) return@addOnSuccessListener
+
+                if (balance < threshold) {
+                    showLowBalanceNotification(
+                        context = context,
+                        panel = panel,
+                        zone = zone,
+                        balance = balance,
+                        threshold = threshold
+                    )
+                }
             }
-        }
     }
 
-    private fun showLowBalanceNotification(context: Context, panel: String, zone: String, balance: Double) {
+    private fun showLowBalanceNotification(
+        context: Context,
+        panel: String,
+        zone: String,
+        balance: Double,
+        threshold: Double
+    ) {
         val channelId = "franchise_low_balance"
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val manager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
             if (manager.getNotificationChannel(channelId) == null) {
                 manager.createNotificationChannel(
-                    NotificationChannel(channelId, "Franchise Low Balance", NotificationManager.IMPORTANCE_HIGH)
+                    NotificationChannel(
+                        channelId,
+                        "Franchise Low Balance",
+                        NotificationManager.IMPORTANCE_HIGH
+                    )
                 )
             }
         }
 
-        val zoneLabel = if (zone.equals("Okara", ignoreCase = true)) panel else "$panel ($zone)"
+        val zoneLabel =
+            if (zone.equals("Okara", ignoreCase = true)) {
+                panel
+            } else {
+                "$panel ($zone)"
+            }
+
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle("$zoneLabel Balance Low")
-            .setContentText("Only Rs. ${"%.0f".format(balance)} left — top up soon.")
+            .setContentText(
+                "Only Rs. ${"%,.0f".format(balance)} left — " +
+                        "threshold Rs. ${"%,.0f".format(threshold)}."
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()
 
-        // NEW: notification ID now includes zone so Okara-Zong and
-        // Renala-Zong low-balance alerts don't overwrite each other.
-        val notificationId = ("${panelKey(panel)}_$zone").hashCode()
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // Panel + zone have separate notification IDs, so:
+        // Zong Okara and Zong Renala cannot overwrite each other.
+        val notificationId =
+            ("${panelKey(panel)}_$zone").hashCode()
+
+        val manager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
         manager.notify(notificationId, notification)
     }
 
-    /** Loads the full balances/thresholds doc, e.g. for a settings screen. */
+    /** Loads the full balances/thresholds document. */
     fun loadAll(callback: (Map<String, Any>) -> Unit) {
         doc.get()
-            .addOnSuccessListener { snap -> callback(snap.data ?: emptyMap()) }
-            .addOnFailureListener { callback(emptyMap()) }
+            .addOnSuccessListener { snap ->
+                callback(snap.data ?: emptyMap())
+            }
+            .addOnFailureListener {
+                callback(emptyMap())
+            }
     }
 }

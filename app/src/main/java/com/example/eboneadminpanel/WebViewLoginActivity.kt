@@ -54,6 +54,10 @@ class WebViewLoginActivity : AppCompatActivity() {
     private var wateenDealerSearchAttempted = false
     private var wateenTopupSubmitAttempted = false
     private var wateenBalanceCheckAttempted = false
+    // Wateen balance-read retry rule: the dashboard may render the
+    // "My Balance" card after onPageFinished. Keep retrying until the
+    // card is actually present instead of failing after one early read.
+    private var wateenBalanceReadAttempt = 0
 
     private var zongDealerListLoadAttempted = false
     private var zongTopupSubmitAttempted = false
@@ -72,6 +76,13 @@ class WebViewLoginActivity : AppCompatActivity() {
     private var sourceTransactionId: String? = null
 
     private var debugTapInspectorEnabled = false
+
+    // Zong balance diagnostic trail: records every navigation step and a
+    // small visible-text snapshot so we can identify exactly where the
+    // automatic Okara/Renala balance flow stops. Diagnostic only — it does
+    // not change the balance-reading logic.
+    private var zongNavigationStep = 0
+    private var zongLastTrailUrl = ""
 
     companion object {
         private const val EBONE_SUSPEND_PASSWORD = "8888"
@@ -205,7 +216,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             if (SpeechHelper.isSpeechAvailable(this)) {
                 SpeechHelper.startSpeechInput(this)
             } else {
-                Toast.makeText(this, "Mic available nahi", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -224,7 +234,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 @android.webkit.JavascriptInterface
                 fun onTap(info: String) {
                     runOnUiThread {
-                        Toast.makeText(this@WebViewLoginActivity, info, Toast.LENGTH_LONG).show()
                         android.util.Log.d("TapInspector", info)
                     }
                 }
@@ -345,11 +354,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             // Single, targeted diagnostic — shows exactly which
             // zone/username this launch resolved to, and whether a
             // cached session was reused vs a fresh login forced.
-            Toast.makeText(
-                this,
-                "$selectedIsp/$targetZone → user=$ispUsername, cached_cookie=${if (savedCookie.isEmpty()) "NONE (fresh login)" else "${savedCookie.length} chars (restoring this zone's own session)"}",
-                Toast.LENGTH_LONG
-            ).show()
 
             // CRITICAL: ALWAYS wipe every cookie first, unconditionally
             // — for EVERY launch, not just when our own cache is empty.
@@ -390,11 +394,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         // fall through to the old zone-unaware fallback store, which
         // previously caused a real wrong-account incident.
         if (!targetZone.equals("Okara", ignoreCase = true)) {
-            Toast.makeText(
-                this,
-                "No $selectedIsp login saved for zone \"$targetZone\" yet — add it in ISP Panel Settings.",
-                Toast.LENGTH_LONG
-            ).show()
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
             webView.loadUrl(loginUrlFor(selectedIsp))
@@ -458,7 +457,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 view.setOnClickListener { switchToAccount(name); dialog.dismiss() }
                 view.findViewById<Button>(R.id.deleteAccountButton).setOnClickListener {
                     val updated = loadAccounts(); updated.remove(name); saveAccounts(updated)
-                    Toast.makeText(this@WebViewLoginActivity, "Account removed", Toast.LENGTH_SHORT).show()
                     dialog.dismiss(); showAccountListDialog()
                 }
                 return view
@@ -489,7 +487,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val username = userInput.text.toString().trim()
                 val password = passInput.text.toString().trim()
                 if (accName.isEmpty() || username.isEmpty() || password.isEmpty()) {
-                    Toast.makeText(this, "Fill all fields", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
                 val accounts = loadAccounts()
@@ -523,7 +520,71 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Diagnostic-only Zong navigation trail.
+     *
+     * For every page reached during CHECK_BALANCE this captures:
+     *  - sequence number
+     *  - selected zone and username
+     *  - exact URL
+     *  - page title / readyState
+     *  - first 500 chars of visible page text
+     *  - whether our balance-check guard has already fired
+     *
+     * This is deliberately kept separate from the balance parser so testing
+     * the navigation cannot accidentally change the balance value or the
+     * Firebase update path.
+     */
+    private fun recordZongNavigationTrail(url: String) {
+        zongNavigationStep++
+        zongLastTrailUrl = url
+
+        val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", targetZone) ?: ""
+        val step = zongNavigationStep
+        val zone = targetZone
+
+        android.util.Log.d(
+            "ZongNavTrail",
+            "STEP $step | zone=$zone | user=$username | attempted=$zongBalanceCheckAttempted | URL=$url"
+        )
+
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "var t=(document.title||'').trim();" +
+                    "var state=document.readyState||'';" +
+                    "var body=(document.body && (document.body.innerText||document.body.textContent))||'';" +
+                    "body=body.replace(/\\s+/g,' ').trim();" +
+                    "var hasAvailable=/Available\\s+Credit/i.test(body);" +
+                    "var hasAccountCredit=/Account\\s+Credit/i.test(body);" +
+                    "return JSON.stringify({title:t,state:state,hasAvailableCredit:hasAvailable,hasAccountCredit:hasAccountCredit,snippet:body.substring(0,500),href:window.location.href});" +
+                    "})()"
+        ) { raw ->
+            val clean = raw
+                .removeSurrounding("\"")
+                .replace("\\\"", "\"")
+                .replace("\\n", " ")
+                .replace("\\\\", "\\")
+
+            android.util.Log.d(
+                "ZongNavTrail",
+                "STEP $step DETAILS | zone=$zone | URL=$url | page=$clean"
+            )
+
+            val shortSnippet = Regex("\"snippet\":\"(.*?)\"")
+                .find(clean)?.groupValues?.get(1)?.take(180).orEmpty()
+
+        }
+    }
+
     private fun handlePageLoaded(url: String) {
+        // NEW: full navigation trail specifically for Zong balance
+        // checks — logs every single page this WebView lands on, so the
+        // exact sequence (e.g. customers.php → root, or wherever it
+        // actually goes) is visible instead of only seeing a final
+        // failure with no trail leading up to it.
+        if (selectedIsp == "ZONG" && manualAction == "CHECK_BALANCE") {
+            recordZongNavigationTrail(url)
+        }
         when {
             selectedIsp == "EBONE" && (url.contains("logincheck") || url.contains("login")) -> {
                 loginDone = false; loginAttemptInProgress = false; tryAutoLogin()
@@ -586,7 +647,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 loginDone = true
                 saveCookieForCurrentAccount("https://partner.ebill.pk")
                 cacheIspSessionCookieIfApplicable("EBONE", "https://partner.ebill.pk")
-                android.widget.Toast.makeText(this, "Ebone: Logged in — URL: $url", android.widget.Toast.LENGTH_LONG).show()
                 webView.evaluateJavascript(
                     "document.querySelectorAll('.modal,.modal-backdrop,.popup').forEach(function(el){el.style.display='none';});document.body.classList.remove('modal-open');", null
                 )
@@ -628,7 +688,8 @@ class WebViewLoginActivity : AppCompatActivity() {
                     if (onWateenRoot) {
                         if (!wateenBalanceCheckAttempted) {
                             wateenBalanceCheckAttempted = true
-                            webView.postDelayed({ readWateenFranchiseBalance() }, 800)
+                            wateenBalanceReadAttempt = 1
+                            webView.postDelayed({ readWateenFranchiseBalance(1) }, 450)
                         }
                     } else if (!wateenBalanceCheckAttempted) {
                         webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/") }, 800)
@@ -650,7 +711,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             selectedIsp == "WATEEN" && url.contains("/dealer/dealer/view/") && manualAction == "DEALER_TOPUP" -> {
                 if (!wateenTopupSubmitAttempted) {
                     wateenTopupSubmitAttempted = true
-                    Toast.makeText(this, "Step 0/4: Reached page: $url", Toast.LENGTH_LONG).show()
                     android.util.Log.d("WebViewLoginActivity", "Wateen dealer topup — landed on: $url")
                     webView.postDelayed({ openWateenPaymentModalAndSubmit() }, 1800)
                 }
@@ -666,24 +726,23 @@ class WebViewLoginActivity : AppCompatActivity() {
                 if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
                     if (!zongDealerListLoadAttempted) {
                         zongDealerListLoadAttempted = true
-                        Toast.makeText(this, "Step 0/4: Logged in — opening Sub-Dealers list…", Toast.LENGTH_SHORT).show()
                         webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/sub_dealers.php") }, 800)
                     }
                 } else if (manualAction == "CHECK_BALANCE") {
-                    // NEW: "Available Credit" only exists on the root
-                    // dashboard page — reading it directly on
-                    // customers.php (where a cached-cookie reuse lands
-                    // us) silently failed since the button isn't there.
-                    // Navigate to root first, then read once actually
-                    // there.
-                    val onZongRoot = !url.contains("customers.php")
-                    if (onZongRoot) {
+                    // The "Available Credit" balance is shown in Zong's
+                    // persistent header banner — confirmed present on
+                    // multiple different page variants (index.php,
+                    // index_manager.php), just NOT on customers.php.
+                    // Read it wherever we land, as long as it's not the
+                    // customers list page.
+                    val onSuitableZongPage = !url.contains("customers.php")
+                    if (onSuitableZongPage) {
                         if (!zongBalanceCheckAttempted) {
                             zongBalanceCheckAttempted = true
-                            webView.postDelayed({ readZongFranchiseBalance() }, 800)
+                            webView.postDelayed({ readZongFranchiseBalance() }, 1500)
                         }
                     } else if (!zongBalanceCheckAttempted) {
-                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/") }, 800)
+                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/index.php") }, 800)
                     }
                 } else if (!url.contains("customers.php")) {
                     webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/customers.php") }, 800)
@@ -702,7 +761,7 @@ class WebViewLoginActivity : AppCompatActivity() {
             selectedIsp == "ZONG" && url.contains("sub_dealers.php") && manualAction == "DEALER_TOPUP" -> {
                 if (!zongTopupSubmitAttempted) {
                     zongTopupSubmitAttempted = true
-                    webView.postDelayed({ searchAndCreditZongDealer(dealerEboneId ?: "", topupAmount ?: "") }, 1200)
+                    webView.postDelayed({ searchAndCreditZongDealer(dealerEboneId ?: "", topupAmount ?: "") }, 700)
                 }
             }
         }
@@ -773,7 +832,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 } else {
                     loginAttemptInProgress = false
                     if (result == "fields_not_ready") {
-                        Toast.makeText(this, "Login form fields never appeared on $selectedIsp after $attempt attempts", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -805,17 +863,11 @@ class WebViewLoginActivity : AppCompatActivity() {
             }
             db.collection("customers").document(custId).update(updates)
         }
-        Toast.makeText(
-            this,
-            if (manualAction == "SUSPEND") "Customer suspended" else "Customer re-enabled",
-            Toast.LENGTH_LONG
-        ).show()
         setResult(RESULT_OK, Intent().apply { putExtra("manual_action_success", true) })
         finish()
     }
 
     private fun finishManualActionFailure(reason: String) {
-        Toast.makeText(this, "Could not complete: $reason", Toast.LENGTH_LONG).show()
         setResult(RESULT_OK, Intent().apply { putExtra("manual_action_success", false) })
         finish()
     }
@@ -872,7 +924,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     }
                 }, 800)
             }
-        }, 1200)
+        }, 700)
     }
 
     private fun searchWateenCustomer(customerId: String) {
@@ -966,9 +1018,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val clean = result.removeSurrounding("\"").replace("\\\"", "\"")
                 val expiry = Regex("\"expiry\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
                 if (expiry.isNotBlank()) {
-                    Toast.makeText(this, "Wateen activated ✅ Expiry: $expiry", Toast.LENGTH_LONG).show()
                 } else {
-                    Toast.makeText(this, "Wateen: Activation may have failed — expiry not found", Toast.LENGTH_LONG).show()
                 }
                 writeActivationResultToFirestore(true, expiry)
                 val resultIntent = Intent().apply { putExtra("activation_success", expiry.isNotBlank()); putExtra("new_expiry_date", expiry) }
@@ -1189,12 +1239,6 @@ class WebViewLoginActivity : AppCompatActivity() {
 
             val balanceNote = if (dealerBalanceAfter.isNotBlank())
                 "Dealer's balance now shows: $dealerBalanceAfter. " else ""
-            Toast.makeText(
-                this,
-                "Submitted. $balanceNote" +
-                        "Refreshing franchise balance…",
-                Toast.LENGTH_LONG
-            ).show()
             setResult(RESULT_OK, Intent().apply {
                 putExtra("dealer_topup_submitted", true)
             })
@@ -1207,11 +1251,14 @@ class WebViewLoginActivity : AppCompatActivity() {
                 }
                 "WATEEN" -> {
                     wateenBalanceCheckAttempted = false
+                    wateenBalanceReadAttempt = 0
                     webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/") }, 600)
                 }
                 "ZONG" -> {
                     zongBalanceCheckAttempted = false
-                    webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/") }, 600)
+                    zongNavigationStep = 0
+                    zongLastTrailUrl = ""
+                    webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/index.php") }, 600)
                 }
                 else -> finish()
             }
@@ -1249,7 +1296,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                         FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { _ ->
                             FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone)
                         }
-                        Toast.makeText(this, "Ebone balance: $balance", Toast.LENGTH_LONG).show()
                         setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
                         finish()
                         return@evaluateJavascript
@@ -1326,7 +1372,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                         webView.loadUrl(href)
                     }
                 }
-            }, 1200)
+            }, 700)
         }
     }
 
@@ -1337,9 +1383,7 @@ class WebViewLoginActivity : AppCompatActivity() {
             return
         }
         if (attempt == 1) {
-            Toast.makeText(this, "Step 1/4: Looking for Payment button…", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(this, "Step 1/4: Retrying (attempt $attempt)…", Toast.LENGTH_SHORT).show()
         }
         webView.evaluateJavascript(
             "(function(){" +
@@ -1371,15 +1415,9 @@ class WebViewLoginActivity : AppCompatActivity() {
                 val paymentMatches = parts.getOrNull(2)?.replace("\\\"", "\"") ?: "[]"
                 android.util.Log.d("WebViewLoginActivity", "Payment button not found after $attempt attempts. .btn-primary texts on page: $btnPrimaryTexts")
                 android.util.Log.d("WebViewLoginActivity", "Elements containing 'payment' text: $paymentMatches")
-                Toast.makeText(
-                    this,
-                    "Payment button not found (after $attempt tries). Buttons: $btnPrimaryTexts. 'payment' text found: $paymentMatches",
-                    Toast.LENGTH_LONG
-                ).show()
                 finishManualActionFailure("Payment button not found on Wateen dealer profile — see previous toast/Logcat for what's actually on the page")
                 return@evaluateJavascript
             }
-            Toast.makeText(this, "Step 2/4: Payment button clicked — opening modal & filling amount…", Toast.LENGTH_SHORT).show()
             webView.postDelayed({
                 webView.evaluateJavascript(
                     "(function(){" +
@@ -1405,7 +1443,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                         finishManualActionFailure("Payment method/amount fields not found in Wateen payment modal (modal may not have opened — Step 1 said clicked, but modal fields aren't there)")
                         return@evaluateJavascript
                     }
-                    Toast.makeText(this, "Step 3/4: Fields filled — clicking Add Payment…", Toast.LENGTH_SHORT).show()
                     webView.postDelayed({
                         webView.evaluateJavascript(
                             "(function(){" +
@@ -1419,7 +1456,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                         ) { submitResultRaw ->
                             val submitResult = submitResultRaw.trim().removeSurrounding("\"")
                             if (submitResult == "submitted") {
-                                Toast.makeText(this, "Step 4/4: Submitted — checking dealer balance…", Toast.LENGTH_SHORT).show()
                                 webView.postDelayed({ captureDealerTopupResult() }, 2500)
                             } else {
                                 finishManualActionFailure("Add Payment button not found in Wateen payment modal")
@@ -1431,30 +1467,130 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun readWateenFranchiseBalance() {
+    /**
+     * Wateen franchise balance reader.
+     *
+     * RULE ADDED:
+     * - The "My Balance" card is on the Wateen root dashboard.
+     * - Do not assume it exists immediately after onPageFinished.
+     * - First read happens after 3 seconds.
+     * - If the card/value is not present yet, retry every 700ms.
+     * - Maximum 8 attempts.
+     * - As soon as a valid numeric value is found, update Firebase and finish.
+     *
+     * The selector is intentionally based on the confirmed Inspect:
+     * h5.card-title text "My Balance" -> parentElement -> span.h2
+     * so the existing Wateen DOM structure is not changed.
+     */
+    /**
+     * Wateen franchise balance reader.
+     *
+     * Confirmed Wateen DOM:
+     * h5.card-title -> a("My Balance") -> same .col -> span.h2
+     *
+     * Rule:
+     * - First check after the existing 1.5-second dashboard delay.
+     * - Match the actual "My Balance" link text, not h5.innerText alone.
+     * - Read the span.h2 from that same column.
+     * - If the dashboard has not rendered the card yet, retry every 700ms.
+     * - Maximum 8 attempts.
+     */
+    /**
+     * Wateen franchise balance reader.
+     *
+     * Confirmed Wateen dashboard structure:
+     * a[href*="accounting/mybalance"] -> My Balance -> card-stats -> span.h2
+     *
+     * Reading rule:
+     * 1) Try the exact inspected Wateen DOM structure.
+     * 2) If WebView's DOM is different, fall back to the visible page text
+     *    and read the number immediately following "My Balance".
+     * 3) Retry on the SAME page every 1200ms, up to 8 attempts.
+     */
+    private fun readWateenFranchiseBalance(attempt: Int = 1) {
+        wateenBalanceReadAttempt = attempt
+
         webView.evaluateJavascript(
             "(function(){" +
-                    "  var labels = document.querySelectorAll('h5.card-title');" +
-                    "  for (var i=0;i<labels.length;i++){" +
-                    "    if (labels[i].innerText.trim() === 'My Balance'){" +
-                    "      var valEl = labels[i].parentElement ? labels[i].parentElement.querySelector('span.h2') : null;" +
-                    "      if (valEl) return valEl.innerText.trim();" +
+                    "  var result = {found:false,value:'',url:window.location.href,snippet:(document.body.innerText || document.body.textContent || '').substring(0,500)};" +
+                    "  var links = document.querySelectorAll('a[href*=' + String.fromCharCode(39) + 'accounting/mybalance' + String.fromCharCode(39) + ']');" +
+                    "  for(var i=0;i<links.length;i++){" +
+                    "    var linkText = (links[i].innerText || links[i].textContent || '').trim();" +
+                    "    if(linkText.toLowerCase().indexOf('my balance') === -1) continue;" +
+                    "    var card = links[i].closest('.card-stats') || links[i].closest('.card');" +
+                    "    var valEl = card ? card.querySelector('span.h2') : null;" +
+                    "    if(!valEl){" +
+                    "      var col = links[i].closest('.col');" +
+                    "      valEl = col ? col.querySelector('span.h2') : null;" +
+                    "    }" +
+                    "    if(valEl){" +
+                    "      var value = (valEl.innerText || valEl.textContent || '').trim();" +
+                    "      if(value){ return JSON.stringify({found:true,value:value,url:window.location.href,snippet:result.snippet}); }" +
                     "    }" +
                     "  }" +
-                    "  return '';" +
+                    "  var body = document.body.innerText || document.body.textContent || '';" +
+                    "  var m = body.match(/My\\s+Balance[\\s\\S]{0,120}?([0-9][0-9,]*(?:\\.[0-9]{1,2})?)/i);" +
+                    "  if(m){ return JSON.stringify({found:true,value:m[1],url:window.location.href,snippet:result.snippet}); }" +
+                    "  return JSON.stringify(result);" +
                     "})()"
         ) { resultRaw ->
-            val text = resultRaw.trim().removeSurrounding("\"")
-            val balance = text.replace(",", "").toDoubleOrNull()
+            val clean = resultRaw
+                .removeSurrounding("\"")
+                .replace("\\\"", "\"")
+                .replace("\\n", " ")
+                .replace("\\r", " ")
+                .replace("\\\\", "\\")
+
+            val foundTrue = clean.contains("\"found\":true")
+            val balance = if (foundTrue) {
+                Regex("\"value\":\"(.*?)\"")
+                    .find(clean)
+                    ?.groupValues
+                    ?.get(1)
+                    ?.replace(",", "")
+                    ?.toDoubleOrNull()
+            } else null
+
             if (balance != null) {
-                FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) { _ ->
-                    FranchiseBalanceManager.checkAndNotifyLowBalance(this, "WATEEN", balance, targetZone)
+                val fieldName = if (targetZone.equals("Okara", ignoreCase = true)) {
+                    "wateenBalance"
+                } else {
+                    "wateenBalance_$targetZone"
                 }
-                Toast.makeText(this, "Wateen balance: $balance", Toast.LENGTH_LONG).show()
-                setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
+
+
+                FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) { _ ->
+                    FranchiseBalanceManager.checkAndNotifyLowBalance(
+                        this,
+                        "WATEEN",
+                        balance,
+                        targetZone
+                    )
+                }
+
+                setResult(
+                    RESULT_OK,
+                    Intent().apply { putExtra("checked_balance", balance) }
+                )
                 finish()
+            } else if (attempt < 8) {
+                val nextAttempt = attempt + 1
+                android.util.Log.d(
+                    "WateenBalance",
+                    "My Balance not found yet — retry $nextAttempt/8 after 700ms. URL=${webView.url}"
+                )
+                webView.postDelayed({
+                    readWateenFranchiseBalance(nextAttempt)
+                }, 700)
             } else {
-                finishManualActionFailure("Could not find the Wateen \"My Balance\" card on this page")
+                val urlInfo = Regex("\"url\":\"(.*?)\"")
+                    .find(clean)?.groupValues?.get(1) ?: "unknown"
+                val snippet = Regex("\"snippet\":\"(.*?)\"")
+                    .find(clean)?.groupValues?.get(1)?.take(300) ?: ""
+
+                finishManualActionFailure(
+                    "Could not find Wateen My Balance after 8 checks. Page: $urlInfo. Text seen: $snippet"
+                )
             }
         }
     }
@@ -1464,7 +1600,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             finishManualActionFailure("Missing dealer name or amount for Zong top-up")
             return
         }
-        Toast.makeText(this, "Step 1/4: Searching for dealer on Sub-Dealers page…", Toast.LENGTH_SHORT).show()
         webView.evaluateJavascript(
             "(function(){" +
                     "  var inp = document.querySelector('input[aria-controls=\"table3\"]');" +
@@ -1481,7 +1616,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 finishManualActionFailure("Dealer search box not found on Zong Sub-Dealers page")
                 return@evaluateJavascript
             }
-            Toast.makeText(this, "Step 2/4: Waiting for search results to filter…", Toast.LENGTH_SHORT).show()
             webView.postDelayed({
                 webView.evaluateJavascript(
                     "(function(){" +
@@ -1525,7 +1659,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                         finishManualActionFailure("Could not determine which dealer's modal opened — stopped WITHOUT crediting anyone.")
                         return@evaluateJavascript
                     }
-                    Toast.makeText(this, "Step 3/4: Opened modal \"$modalSelector\" for row: $matchedRowText — filling amount…", Toast.LENGTH_LONG).show()
                     webView.postDelayed({
                         webView.evaluateJavascript(
                             "(function(){" +
@@ -1555,7 +1688,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                             // safety. Admin has been informed of the
                             // risk and will manually test with small
                             // amounts.
-                            Toast.makeText(this, "Step 4/4: Submitting credit for \"$searchTerm\"…", Toast.LENGTH_SHORT).show()
                             webView.evaluateJavascript(
                                 "(function(){" +
                                         "  var modal = document.querySelector('$modalSelector');" +
@@ -1579,29 +1711,68 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun readZongFranchiseBalance() {
+    private fun readZongFranchiseBalance(attempt: Int = 1) {
         webView.evaluateJavascript(
             "(function(){" +
-                    "  var btns = document.querySelectorAll('button.btn-success');" +
-                    "  for (var i=0;i<btns.length;i++){" +
-                    "    var t = btns[i].innerText || '';" +
-                    "    var m = t.match(/Available Credit Rs\\.?\\s*([0-9,]+)/i);" +
-                    "    if (m) return m[1];" +
-                    "  }" +
-                    "  return '';" +
+                    // NEW: search the ENTIRE page's visible text,
+                    // regardless of which specific element/class
+                    // contains it — this page (index_manager.php) shows
+                    // "Available Credit Rs. X" in a different element
+                    // structure than the earlier-confirmed index.php,
+                    // so matching by page-wide text instead of a
+                    // specific selector works on both (and any other
+                    // variant).
+                    "  var bodyText = document.body.innerText || document.body.textContent || '';" +
+                    "  var m = bodyText.match(/Available Credit Rs\\.?\\s*(-?[0-9,]+(\\.[0-9]+)?)/i);" +
+                    "  if (m) return JSON.stringify({found:true, value:m[1]});" +
+                    "  var m2 = bodyText.match(/Account Credit[^0-9\\-]*(-?[0-9,]+(\\.[0-9]+)?)/i);" +
+                    "  if (m2) return JSON.stringify({found:true, value:m2[1]});" +
+                    // Nothing found — return diagnostic info (URL + a
+                    // body text snippet) instead of just empty, so a
+                    // failure shows exactly what page we were actually
+                    // on, rather than requiring another guess.
+                    "  return JSON.stringify({found:false, url: window.location.href, snippet: bodyText.substring(0,300)});" +
                     "})()"
         ) { resultRaw ->
-            val text = resultRaw.trim().removeSurrounding("\"")
-            val balance = text.replace(",", "").toDoubleOrNull()
+            val clean = resultRaw
+                .removeSurrounding("\"")
+                .replace("\\\"", "\"")
+                .replace("\\n", " ")
+                .replace("\\\\", "\\")
+            val foundTrue = clean.contains("\"found\":true")
+            val balance = if (foundTrue) {
+                Regex("\"value\":\"(.*?)\"").find(clean)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+            } else null
+
             if (balance != null) {
+                // Shows exactly which zone this balance is being saved
+                // under, and the Firestore field name that will
+                // actually be written — pinpoints whether Renala's
+                // reading is truly going into "zongBalance_Renala" (not
+                // accidentally overwriting Okara's plain "zongBalance").
+                val fieldName = if (targetZone.equals("Okara", ignoreCase = true)) "zongBalance" else "zongBalance_$targetZone"
                 FranchiseBalanceManager.updateBalance("ZONG", balance, targetZone) { _ ->
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "ZONG", balance, targetZone)
                 }
-                Toast.makeText(this, "Zong balance: $balance", Toast.LENGTH_LONG).show()
                 setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
                 finish()
             } else {
-                finishManualActionFailure("Could not find the Zong \"Available Credit\" button on this page")
+                // Renala can render the dashboard/header immediately while the
+                // "Available Credit" button is inserted a little later by the
+                // panel's JavaScript. Do not fail after the first read. Retry
+                // the SAME page several times before declaring a real failure.
+                // This keeps Okara's working 3-second behavior unchanged while
+                // making Renala reliable on its faster/different redirect.
+                if (attempt < 8) {
+                    val nextAttempt = attempt + 1
+                    webView.postDelayed({
+                        readZongFranchiseBalance(nextAttempt)
+                    }, 700)
+                } else {
+                    val urlInfo = Regex("\"url\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: "unknown"
+                    val snippet = Regex("\"snippet\":\"(.*?)\"").find(clean)?.groupValues?.get(1)?.take(200) ?: ""
+                    finishManualActionFailure("Could not find Zong balance after 8 checks. Page: $urlInfo. Text seen: $snippet")
+                }
             }
         }
     }
@@ -1651,7 +1822,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 if (dealerName.isNotEmpty()) {
                     switchToZongDealerPanel(dealerName)
                 } else {
-                    Toast.makeText(this, "Zong: Dealer name not found on profile", Toast.LENGTH_LONG).show()
                     writeActivationResultToFirestore(false, ""); finish()
                 }
             }
@@ -1667,7 +1837,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         )
         val accountsJson = prefs.getString("all_accounts_json", null)
         if (accountsJson.isNullOrEmpty()) {
-            Toast.makeText(this, "No saved accounts — add dealer in ISP Panel Settings", Toast.LENGTH_LONG).show()
             writeActivationResultToFirestore(false, ""); finish(); return
         }
         try {
@@ -1684,7 +1853,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 }
             }
             if (dealerUsername == null || dealerPassword == null) {
-                Toast.makeText(this, "Dealer \"$dealerName\" not found in ISP Panel Settings", Toast.LENGTH_LONG).show()
                 writeActivationResultToFirestore(false, ""); finish(); return
             }
             val accounts = loadAccounts()
@@ -1700,7 +1868,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             loginDone = false
             webView.loadUrl("https://turbonet.zong.com.pk/login.php")
         } catch (e: Exception) {
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
             writeActivationResultToFirestore(false, ""); finish()
         }
     }
@@ -1829,7 +1996,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
                 val incomplete = address.isEmpty() || phone.isEmpty()
                 if (incomplete && attempt < 4) {
-                    webView.postDelayed({ fetchZongCustomerDetails(attempt + 1) }, 1200)
+                    webView.postDelayed({ fetchZongCustomerDetails(attempt + 1) }, 700)
                     return@evaluateJavascript
                 }
 
