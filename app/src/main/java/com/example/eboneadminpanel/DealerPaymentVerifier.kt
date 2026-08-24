@@ -1,63 +1,34 @@
 package com.example.eboneadminpanel
 
+import android.app.ActivityManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 
 /**
- * Single shared place that marks a dealerTransactions record VERIFIED,
- * credits the dealer's internal balance field (wateenBalance/
- * eboneBalance/zongBalance), and then automatically triggers the REAL
- * ISP panel transfer (WebViewLoginActivity in DEALER_TOPUP mode), using
- * the dealer's own zone (Okara/Renala/etc) and panel-specific ID. No
- * manual "Send Now" tap is required: once a payment is verified, the
- * whole thing — including the actual panel submission — happens on its
- * own.
+ * Single authority for dealer-payment verification.
  *
- * CRITICAL — how the auto-launch actually works (fixed root cause of
- * payments staying stuck on PENDING until a manual refresh):
+ * Existing rules are preserved:
+ *  - mark dealerTransactions VERIFIED
+ *  - credit dealer's panel balance
+ *  - launch the existing WebView DEALER_TOPUP automation
  *
- * Android (10+) blocks apps from starting a new Activity while the app
- * is in the background — this is a hard platform security restriction,
- * not something a normal startActivity() call can override, and it
- * fails SILENTLY (no crash, no error — the call is simply ignored).
- * Since DealerPaymentSmsReceiver runs from a live SMS broadcast with the
- * app usually in the background, a plain startActivity() call here
- * would get silently dropped by Android — which is exactly why the
- * payment stayed PENDING until the admin manually opened the app
- * (bringing it to the foreground, where starting an Activity is
- * allowed again) and refreshed.
- *
- * FIX: instead of calling startActivity() directly, this posts a
- * high-priority notification with a full-screen intent
- * (NotificationCompat.Builder.setFullScreenIntent). This is the
- * standard, Google-documented Android pattern for "must show a screen
- * automatically triggered by a background event" (the same mechanism
- * incoming-call and alarm apps use) — it is specifically EXEMPTED from
- * the background-activity-start restriction, so it reliably launches
- * WebViewLoginActivity even when the app was fully in the background.
- * WebViewLoginActivity's own automation logic (login, search, submit,
- * finish()) is completely unchanged — only how it gets triggered from a
- * background context has changed.
- *
- * Requires the "android.permission.USE_FULL_SCREEN_INTENT" permission
- * in AndroidManifest.xml.
- *
- * Used by:
- *   - DealerPaymentSmsReceiver (live SMS — always "today" by
- *     definition, since it only fires on a message arriving right now)
- *   - DealerPaymentSmsScanner, ONLY when the matched SMS's own date is
- *     today (same calendar day) — a match found for an older SMS is
- *     NOT run through here automatically; see NEEDS_REVIEW handling in
- *     DealerPaymentSmsScanner and the manual "Review & Verify" action in
- *     DealerPanelActivity instead (which also auto-transfers immediately
- *     after the admin manually confirms it).
+ * The only automation change is HOW the WebView is launched from a live SMS
+ * background event: a high-priority full-screen notification is used because
+ * Android blocks ordinary background Activity launches on modern Android.
  */
 object DealerPaymentVerifier {
 
     private const val TAG = "DealerPaymentVerifier"
+    private const val CHANNEL_ID = "dealer_auto_transfer"
+    private const val NOTIFICATION_ID_BASE = 740000
 
     fun verifyAndCredit(
         context: Context,
@@ -65,57 +36,118 @@ object DealerPaymentVerifier {
         transactionData: Map<String, Any>,
         onDone: (Boolean) -> Unit = {}
     ) {
-        val dealerId = transactionData["dealerId"] as? String
-        val panel = (transactionData["panel"] as? String)?.uppercase()
-        val amount = (transactionData["amount"] as? Number)?.toDouble()
-
-        if (dealerId == null || panel == null || amount == null) {
-            onDone(false)
-            return
-        }
-
-        val balanceField = when (panel) {
-            "WATEEN" -> "wateenBalance"
-            "EBONE" -> "eboneBalance"
-            "ZONG" -> "zongBalance"
-            else -> null
-        }
-        if (balanceField == null) {
-            onDone(false)
-            return
-        }
-
         val db = FirebaseFirestore.getInstance()
-        val batch = db.batch()
-        batch.update(
-            db.collection("dealerTransactions").document(transactionId),
-            mapOf(
-                "status" to "VERIFIED",
-                "verifiedAt" to System.currentTimeMillis()
-            )
-        )
-        batch.update(
-            db.collection("dealers").document(dealerId),
-            balanceField, FieldValue.increment(amount)
-        )
-        batch.commit()
-            .addOnSuccessListener {
-                onDone(true)
-                autoLaunchPanelTransfer(context, transactionId, dealerId, panel, amount)
+        val txRef = db.collection("dealerTransactions").document(transactionId)
+
+        /*
+         * Idempotent verification:
+         * Receiver and inbox scanner can see the same SMS at nearly the
+         * same time. Only the first call is allowed to move PENDING ->
+         * VERIFIED and increment the dealer balance.
+         */
+        db.runTransaction { transaction ->
+            val txSnapshot = transaction.get(txRef)
+
+            val status =
+                txSnapshot.getString("status")
+                    ?: return@runTransaction false
+
+            if (status != "PENDING") {
+                return@runTransaction false
             }
-            .addOnFailureListener { onDone(false) }
+
+            val dealerId =
+                txSnapshot.getString("dealerId")
+                    ?: return@runTransaction false
+
+            val panel =
+                txSnapshot.getString("panel")
+                    ?.uppercase()
+                    ?: return@runTransaction false
+
+            val amount =
+                (txSnapshot.get("amount") as? Number)
+                    ?.toDouble()
+                    ?: return@runTransaction false
+
+            val balanceField = when (panel) {
+                "WATEEN" -> "wateenBalance"
+                "EBONE" -> "eboneBalance"
+                "ZONG" -> "zongBalance"
+                else -> null
+            } ?: return@runTransaction false
+
+            val dealerRef =
+                db.collection("dealers").document(dealerId)
+
+            transaction.update(
+                txRef,
+                mapOf(
+                    "status" to "VERIFIED",
+                    "verifiedAt" to System.currentTimeMillis(),
+                    "transferStatus" to "AUTO_SENDING"
+                )
+            )
+
+            transaction.update(
+                dealerRef,
+                balanceField,
+                FieldValue.increment(amount)
+            )
+
+            true
+        }.addOnSuccessListener { changed ->
+            if (!changed) {
+                /*
+                 * false means another receiver/scanner already processed
+                 * this transaction, or it was no longer PENDING.
+                 * Never launch a second transfer.
+                 */
+                onDone(false)
+                return@addOnSuccessListener
+            }
+
+            onDone(true)
+
+            val dealerId =
+                transactionData["dealerId"] as? String
+                    ?: return@addOnSuccessListener
+
+            val panel =
+                (transactionData["panel"] as? String)
+                    ?.uppercase()
+                    ?: return@addOnSuccessListener
+
+            val amount =
+                (transactionData["amount"] as? Number)
+                    ?.toDouble()
+                    ?: return@addOnSuccessListener
+
+            autoLaunchPanelTransfer(
+                context = context.applicationContext,
+                transactionId = transactionId,
+                dealerId = dealerId,
+                panel = panel,
+                amount = amount
+            )
+        }.addOnFailureListener { error ->
+            Log.e(
+                TAG,
+                "Verification transaction failed for $transactionId",
+                error
+            )
+            onDone(false)
+        }
     }
 
     /**
-     * Reads the dealer's own zone and panel-specific ID, then triggers
-     * WebViewLoginActivity in DEALER_TOPUP mode automatically via a
-     * full-screen-intent notification (see class doc for why) — same
-     * code path as the manual "Send Now" button, just triggered without
-     * a tap and reliably from the background. If the dealer has no ID
-     * configured for this panel, this logs a warning and does nothing
-     * further (the payment stays VERIFIED + wallet-credited, but the
-     * real panel transfer will need a manual Send Now once the admin
-     * fills in that dealer's ID).
+     * Launches the EXISTING DEALER_TOPUP WebView automation.
+     *
+     * Background execution uses a full-screen notification so Android's
+     * background-activity-start restriction does not silently discard the
+     * launch. The notification body itself opens DealerPanelActivity, not
+     * DEALER_TOPUP, so tapping the notification cannot accidentally replay
+     * the transfer.
      */
     private fun autoLaunchPanelTransfer(
         context: Context,
@@ -124,45 +156,203 @@ object DealerPaymentVerifier {
         panel: String,
         amount: Double
     ) {
-        FirebaseFirestore.getInstance().collection("dealers").document(dealerId).get()
+        FirebaseFirestore.getInstance()
+            .collection("dealers")
+            .document(dealerId)
+            .get()
             .addOnSuccessListener { dealerDoc ->
-                val dealerName = dealerDoc.getString("name") ?: "Dealer"
-                val zone = dealerDoc.getString("zone")?.ifBlank { null } ?: "Okara"
+
+                val dealerName =
+                    dealerDoc.getString("name") ?: "Dealer"
+
+                val zone =
+                    dealerDoc.getString("zone")
+                        ?.ifBlank { null }
+                        ?: "Okara"
+
                 val ispIdField = when (panel) {
                     "WATEEN" -> "wateenDealerId"
                     "ZONG" -> "zongDealerId"
                     else -> "eboneDealerId"
                 }
-                val ispDealerId = dealerDoc.getString(ispIdField)?.trim().orEmpty()
+
+                val ispDealerId =
+                    dealerDoc.getString(ispIdField)
+                        ?.trim()
+                        .orEmpty()
 
                 if (ispDealerId.isEmpty()) {
-                    Log.w(TAG, "Auto-transfer skipped for $dealerName ($panel) — no $ispIdField configured. Wallet was credited; use Send Now manually once the ID is added.")
+                    markAutoTransferFailed(
+                        transactionId,
+                        "No $ispIdField configured for $dealerName"
+                    )
                     return@addOnSuccessListener
                 }
 
-                val intent = Intent(context, WebViewLoginActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    putExtra("selected_isp", panel)
-                    putExtra("manual_action", "DEALER_TOPUP")
-                    putExtra("dealer_ebone_id", ispDealerId)
-                    putExtra("topup_amount", amount.toString())
-                    putExtra("dealer_internal_id", dealerId)
-                    putExtra("dealer_display_name", dealerName)
-                    putExtra("target_zone", zone)
-                    putExtra("source_transaction_id", transactionId)
+                val transferIntent =
+                    Intent(context, WebViewLoginActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        putExtra("selected_isp", panel)
+                        putExtra("manual_action", "DEALER_TOPUP")
+                        putExtra("dealer_ebone_id", ispDealerId)
+                        putExtra("topup_amount", amount.toString())
+                        putExtra("dealer_internal_id", dealerId)
+                        putExtra("dealer_display_name", dealerName)
+                        putExtra("target_zone", zone)
+                        putExtra("source_transaction_id", transactionId)
+                    }
+
+                /*
+                 * FIRST PATH — the admin app is already visible.
+                 *
+                 * In this case we can open the proven WebView flow directly
+                 * and do not need a notification tap at all.
+                 */
+                if (isAppForeground(context)) {
+                    try {
+                        context.startActivity(transferIntent)
+
+                        Log.d(
+                            TAG,
+                            "DIRECT AUTO TRANSFER LAUNCHED: " +
+                                    "$dealerName ($zone/$panel) Rs.$amount txn=$transactionId"
+                        )
+                        return@addOnSuccessListener
+                    } catch (e: Exception) {
+                        Log.e(
+                            TAG,
+                            "Direct WebView auto-launch failed; using full-screen fallback",
+                            e
+                        )
+                    }
                 }
-                // REVERTED: the full-screen-intent notification approach
-                // introduced a NEW, confirmed bug (tapping the
-                // notification sent the payment back to PENDING instead
-                // of letting it proceed) — reverting to the simpler,
-                // previously-stable direct launch while the real
-                // background-launch issue gets root-caused with actual
-                // Logcat evidence instead of another speculative fix.
-                Log.d(TAG, "Auto-launching panel transfer: $dealerName ($zone/$panel) Rs.$amount")
-                context.startActivity(intent)
+
+                /*
+                 * SECOND PATH — app is not visible.
+                 *
+                 * Android restricts arbitrary background Activity launches,
+                 * so use the existing full-screen PendingIntent path. The
+                 * visible notification content still opens DealerPanel, while
+                 * the full-screen action targets the proven DEALER_TOPUP flow.
+                 */
+                val panelIntent =
+                    Intent(context, DealerPanelActivity::class.java).apply {
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        )
+                    }
+
+                val fullScreenPendingIntent =
+                    PendingIntent.getActivity(
+                        context,
+                        (NOTIFICATION_ID_BASE + transactionId.hashCode()),
+                        transferIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or
+                                PendingIntent.FLAG_IMMUTABLE
+                    )
+
+                val contentPendingIntent =
+                    PendingIntent.getActivity(
+                        context,
+                        (NOTIFICATION_ID_BASE + transactionId.hashCode() + 1),
+                        panelIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or
+                                PendingIntent.FLAG_IMMUTABLE
+                    )
+
+                val manager =
+                    context.getSystemService(Context.NOTIFICATION_SERVICE)
+                            as NotificationManager
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val channel =
+                        NotificationChannel(
+                            CHANNEL_ID,
+                            "Dealer Auto Transfers",
+                            NotificationManager.IMPORTANCE_HIGH
+                        ).apply {
+                            description =
+                                "Automatically opens verified dealer balance transfers"
+                        }
+
+                    manager.createNotificationChannel(channel)
+                }
+
+                val notification =
+                    NotificationCompat.Builder(context, CHANNEL_ID)
+                        .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                        .setContentTitle("Dealer payment verified")
+                        .setContentText(
+                            "$dealerName — Rs. ${"%.0f".format(amount)} ($panel) is being transferred"
+                        )
+                        .setPriority(NotificationCompat.PRIORITY_MAX)
+                        .setCategory(NotificationCompat.CATEGORY_ALARM)
+                        .setAutoCancel(true)
+                        .setContentIntent(contentPendingIntent)
+                        .setFullScreenIntent(fullScreenPendingIntent, true)
+                        .build()
+
+                /*
+                 * Automatic path:
+                 * posting the full-screen intent causes WebViewLoginActivity
+                 * to open without an admin tap when the OS permits full-screen
+                 * intents. The notification shade item itself opens DealerPanel,
+                 * so it cannot retrigger the transfer.
+                 */
+                manager.notify(
+                    NOTIFICATION_ID_BASE + (transactionId.hashCode() and 0x7fffffff),
+                    notification
+                )
+
+                Log.d(
+                    TAG,
+                    "Automatic dealer transfer requested: " +
+                            "$dealerName ($zone/$panel) Rs.$amount txn=$transactionId"
+                )
             }
-            .addOnFailureListener { e ->
-                Log.e(TAG, "Auto-transfer: could not load dealer $dealerId — ${e.message}")
+            .addOnFailureListener { error ->
+                markAutoTransferFailed(
+                    transactionId,
+                    "Could not load dealer: ${error.message}"
+                )
             }
+    }
+
+    private fun isAppForeground(
+        context: Context
+    ): Boolean {
+        val activityManager =
+            context.getSystemService(Context.ACTIVITY_SERVICE)
+                    as? ActivityManager
+                ?: return false
+
+        val processes =
+            activityManager.runningAppProcesses
+                ?: return false
+
+        return processes.any { processInfo ->
+            processInfo.processName == context.packageName &&
+                    processInfo.importance ==
+                    ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+        }
+    }
+
+    private fun markAutoTransferFailed(
+        transactionId: String,
+        reason: String
+    ) {
+        Log.e(TAG, "Automatic transfer failed for $transactionId: $reason")
+
+        FirebaseFirestore.getInstance()
+            .collection("dealerTransactions")
+            .document(transactionId)
+            .update(
+                mapOf(
+                    "transferStatus" to "AUTO_FAILED",
+                    "transferError" to reason
+                )
+            )
     }
 }

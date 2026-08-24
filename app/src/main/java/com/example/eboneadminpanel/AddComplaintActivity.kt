@@ -2,11 +2,8 @@ package com.example.eboneadminpanel
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.View
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.database.FirebaseDatabase
@@ -34,25 +31,16 @@ class AddComplaintActivity : AppCompatActivity() {
         val loginButton = findViewById<Button>(R.id.ocrButton)
         val assignButton = findViewById<Button>(R.id.assignComplaintButton)
 
-        pushDownTitleText()
-
         loginButton.setOnClickListener {
-            // Added ZONG — previously only Ebone and Wateen were selectable
-            // here, even though ZONG panel automation already exists.
             val ispList = arrayOf(
                 "Ebone (ebill.pk)",
-                "Wateen (wateen.com)",
-                "Zong (turbonet.zong.com.pk)"
+                "Wateen (wateen.com)"
             )
 
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Select ISP")
                 .setItems(ispList) { _, which ->
-                    val selectedISP = when (which) {
-                        0 -> "EBONE"
-                        1 -> "WATEEN"
-                        else -> "ZONG"
-                    }
+                    val selectedISP = if (which == 0) "EBONE" else "WATEEN"
                     val intent = Intent(this, WebViewLoginActivity::class.java)
                     intent.putExtra("selected_isp", selectedISP)
                     webViewLauncher.launch(intent)
@@ -197,39 +185,4 @@ class AddComplaintActivity : AppCompatActivity() {
                 if (fetchedPhone.isNotEmpty()) phoneInput.setText(fetchedPhone)
             }
         }
-
-    // ===================== FIX: TITLE OVERLAPPING STATUS BAR =====================
-
-    /** Finds the "NEW COMPLAINT" title TextView (wherever it sits in the
-     * XML) and pushes it 8mm down so it clears the status bar — done in
-     * code since we're not editing the layout XML directly. */
-    private fun pushDownTitleText() {
-        val dp = resources.displayMetrics.density
-        val eightMm = (8 * 6.3f * dp).toInt()
-        val root = window.decorView.findViewById<View>(android.R.id.content)
-        val titleView = findTextViewByText(root as? ViewGroup ?: return, "NEW COMPLAINT")
-        titleView?.let { tv ->
-            val lp = tv.layoutParams
-            if (lp is ViewGroup.MarginLayoutParams) {
-                lp.topMargin += eightMm
-                tv.layoutParams = lp
-            } else {
-                tv.setPadding(tv.paddingLeft, tv.paddingTop + eightMm, tv.paddingRight, tv.paddingBottom)
-            }
-        }
-    }
-
-    private fun findTextViewByText(root: ViewGroup, text: String): TextView? {
-        for (i in 0 until root.childCount) {
-            val child = root.getChildAt(i)
-            if (child is TextView && child.text.toString().trim().equals(text, ignoreCase = true)) {
-                return child
-            }
-            if (child is ViewGroup) {
-                val found = findTextViewByText(child, text)
-                if (found != null) return found
-            }
-        }
-        return null
-    }
 }

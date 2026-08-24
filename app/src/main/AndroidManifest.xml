@@ -4,15 +4,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
-    <!-- NEW: required so the auto-payment-transfer notification can
-         reliably launch WebViewLoginActivity even when the app is in
-         the background (bypasses Android 10+'s background-activity-
-         start restriction, which was silently blocking automatic
-         transfers and causing payments to stay PENDING until a manual
-         refresh). -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <uses-feature
         android:name="android.hardware.telephony"
@@ -106,11 +100,7 @@
         <activity android:name=".AddEmployeeActivity" android:exported="false" />
         <activity android:name=".SmsMatchSettingsActivity" android:exported="false" />
         <activity android:name=".AppVersionActivity" android:exported="false" />
-
-        <activity
-            android:name=".PaymentLimitActivity"
-            android:exported="false" />
-
+        <activity android:name=".PaymentLimitActivity" android:exported="false" />
         <activity android:name=".CustomerListActivity" android:exported="false" />
         <activity android:name=".BiometricAttendanceActivity" android:exported="false" />
         <activity android:name=".OfficeGeofenceActivity" android:exported="false" />
@@ -118,6 +108,19 @@
         <activity android:name=".AllSalaryTotalActivity" android:exported="false" />
         <activity android:name=".OfficeTimmingsActivity" android:exported="false" />
 
+        <!-- Dealer Panel -->
+        <activity android:name=".DealerPanelActivity" android:exported="false" />
+        <activity android:name=".DealerDashboardActivity" android:exported="false" />
+        <activity android:name=".DealerMenuActivity" android:exported="false" />
+        <!-- NEW: these two were present in the codebase but never
+             registered here — SendDealerPaymentActivity crashed with
+             ActivityNotFoundException; DealerPaymentLogActivity (the 📄
+             Payment Log screen) would have crashed the same way the
+             first time it was opened. -->
+        <activity android:name=".SendDealerPaymentActivity" android:exported="false" />
+        <activity android:name=".DealerPaymentLogActivity" android:exported="false" />
+
+        <!-- SMS Receiver -->
         <receiver
             android:name=".PaymentSmsReceiver"
             android:exported="true"
@@ -127,6 +130,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- Dealer Payment SMS Receiver -->
         <receiver
             android:name=".DealerPaymentSmsReceiver"
             android:exported="true"
@@ -136,30 +140,13 @@
             </intent-filter>
         </receiver>
 
-        <activity android:name=".DealerPanelActivity" android:exported="false" />
-        <activity android:name=".DealerDashboardActivity" android:exported="false" />
-
-        <!-- NEW: Full-screen Franchise/Dealer menu opened by ☰ -->
-        <activity
-            android:name=".DealerMenuActivity"
-            android:exported="false" />
-
-        <!-- NEW: permanent "Send Dealer Payment" screen (Dealer →
-             Company → Amount → Send), replacing the earlier temporary
-             test-topup dialog. Also used for the "Send Now" action on
-             SMS-verified pending payments (pre-filled + locked). -->
-        <activity android:name=".SendDealerPaymentActivity" android:exported="false" />
-
-        <!-- NEW: Payment Log / transaction history screen — reads our
-             own "dealerPayments" log with This Month / Last Month /
-             Custom date-range filters. -->
-        <activity android:name=".DealerPaymentLogActivity" android:exported="false" />
-
+        <!-- Payment Activation Service -->
         <service
             android:name=".PaymentActivationService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- FileProvider for APK install -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

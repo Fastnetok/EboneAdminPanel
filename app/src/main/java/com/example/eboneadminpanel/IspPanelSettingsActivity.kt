@@ -155,13 +155,30 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             return if (parts.isEmpty()) "(no accounts saved)" else parts.joinToString(", ")
         }
 
-        private fun getPrefs(context: Context) =
-            EncryptedSharedPreferences.create(
-                context, PREFS_FILE,
-                MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+        private fun getPrefs(context: Context): android.content.SharedPreferences {
+            val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            return try {
+                EncryptedSharedPreferences.create(
+                    context, PREFS_FILE, masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e: Exception) {
+                // NEW: self-heal from Android Keystore "VERIFICATION_FAILED"
+                // crashes — stale encrypted data (e.g. restored via
+                // Android's Auto Backup after an uninstall/reinstall)
+                // no longer matches the current Keystore key. Wipe and
+                // recreate instead of crashing every time.
+                android.util.Log.e("IspPanelSettingsActivity", "Corrupted encrypted prefs — recreating fresh", e)
+                context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE).edit().clear().commit()
+                context.deleteSharedPreferences(PREFS_FILE)
+                EncryptedSharedPreferences.create(
+                    context, PREFS_FILE, masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            }
+        }
     }
 
     private lateinit var accountsContainer: LinearLayout
@@ -468,11 +485,23 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         else     -> "ebill.pk"
     }
 
-    private fun getPrefs() =
-        EncryptedSharedPreferences.create(
-            this, PREFS_FILE,
-            MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+    private fun getPrefs(): android.content.SharedPreferences {
+        val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        return try {
+            EncryptedSharedPreferences.create(
+                this, PREFS_FILE, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("IspPanelSettingsActivity", "Corrupted encrypted prefs — recreating fresh", e)
+            getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE).edit().clear().commit()
+            deleteSharedPreferences(PREFS_FILE)
+            EncryptedSharedPreferences.create(
+                this, PREFS_FILE, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
+    }
 }

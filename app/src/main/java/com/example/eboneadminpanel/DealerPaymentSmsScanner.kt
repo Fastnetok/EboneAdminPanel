@@ -8,31 +8,31 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Calendar
 
 /**
- * Same job as PaymentSmsScanner (customer payments) but for DEALER
- * transactions — scans every PENDING dealerTransactions doc against the
- * SMS inbox within the configured match window. Covers SMS that arrived
- * while DealerPaymentSmsReceiver wasn't running (app killed, phone
- * rebooted, background restrictions, etc), and lets the admin manually
- * re-check via the ⟳ button.
+ * Dealer SMS scanner.
  *
- * IMPORTANT — "today vs older" policy (locked in per admin decision):
- *   - If the matched SMS's own date (not the scan time — the date the
- *     message itself was received, from Telephony.Sms.DATE) is TODAY:
- *     auto-verify and credit the dealer's balance immediately via
- *     DealerPaymentVerifier, exactly as the live receiver does.
- *   - If the matched SMS is from an EARLIER day (only found at all
- *     because the admin widened the match window beyond "today"): do
- *     NOT auto-credit. Instead mark the transaction status
- *     "NEEDS_REVIEW" with the matched SMS's body/date attached, so the
- *     admin can see it in the Dealer Panel and manually confirm before
- *     any balance is credited. This prevents a wide match window from
- *     silently auto-crediting old/replayed SMS.
+ * Dealer rule:
+ * - Any exact TID / OCR-TID / Reference match inside the configured SMS
+ *   matching window can be auto-verified, regardless of whether the matched
+ *   SMS is from today or an older day within that selected window.
+ * - The old Review & Verify gate is therefore not used for dealer payments.
+ *
+ * This is dealer-only logic. Customer payment logic is not changed here.
  */
 object DealerPaymentSmsScanner {
 
     private const val TAG = "DealerPaymentSmsScanner"
 
-    private data class SmsEntry(val body: String, val dateMillis: Long)
+    private data class SmsEntry(
+        val body: String,
+        val dateMillis: Long,
+        val normalizedBody: String
+    )
+
+    private fun normalizeIdentifier(value: String): String =
+        value.filter { it.isLetterOrDigit() }.uppercase()
+
+    private fun normalizeSearchText(value: String): String =
+        value.filter { it.isLetterOrDigit() }.uppercase()
 
     private fun startOfTodayMillis(): Long {
         val cal = Calendar.getInstance()
@@ -43,6 +43,177 @@ object DealerPaymentSmsScanner {
         return cal.timeInMillis
     }
 
+    fun scanLivePending(context: Context): Int {
+        var matchedCount = 0
+
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val snapshot = Tasks.await(
+                db.collection("dealerTransactions")
+                    .whereEqualTo("status", "PENDING")
+                    .get()
+            )
+
+            if (snapshot.isEmpty) return 0
+
+            val todayStart = startOfTodayMillis()
+            val matchWindowDays =
+                SmsMatchSettingsActivity.getMatchWindowDays(context)
+                    .coerceAtLeast(1)
+
+            val cal = Calendar.getInstance()
+            cal.timeInMillis = todayStart
+            cal.add(Calendar.DAY_OF_YEAR, -(matchWindowDays - 1))
+            val windowStart = cal.timeInMillis
+
+            val uri = Telephony.Sms.Inbox.CONTENT_URI
+            val projection = arrayOf(
+                Telephony.Sms.BODY,
+                Telephony.Sms.DATE
+            )
+
+            val selection = "${Telephony.Sms.DATE} >= ?"
+            val selectionArgs = arrayOf(windowStart.toString())
+            val sortOrder = "${Telephony.Sms.DATE} DESC"
+
+            val smsEntries = mutableListOf<SmsEntry>()
+
+            context.contentResolver.query(
+                uri,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val body =
+                        c.getString(
+                            c.getColumnIndexOrThrow(Telephony.Sms.BODY)
+                        ) ?: ""
+
+                    val date =
+                        c.getLong(
+                            c.getColumnIndexOrThrow(Telephony.Sms.DATE)
+                        )
+
+                    smsEntries.add(
+                        SmsEntry(
+                            body = body,
+                            dateMillis = date,
+                            normalizedBody = normalizeSearchText(body)
+                        )
+                    )
+                }
+            }
+
+            /*
+             * Five minutes only protects against tiny device/bank clock
+             * differences. It cannot allow a February SMS to match an August
+             * payment.
+             */
+            val clockSkewGraceMs = 5L * 60L * 1000L
+
+            for (doc in snapshot.documents) {
+                val submittedAt =
+                    doc.getLong("submittedAt")
+                        ?: continue
+
+                /*
+                 * DEALER RULE:
+                 * once an exact SMS/TID/reference match is found inside the
+                 * configured SMS matching window, its SMS age does NOT block
+                 * the dealer auto-transfer.
+                 *
+                 * In other words, a matched 360-day-old SMS can still trigger
+                 * automatically. The configured window is the search boundary;
+                 * "today vs old" is no longer a manual-review gate for dealer
+                 * payments.
+                 */
+                if (submittedAt <= 0L) {
+                    continue
+                }
+
+                val tid =
+                    doc.getString("bankTransactionId") ?: ""
+
+                val ocrTid =
+                    doc.getString("ocrTransactionId") ?: ""
+
+                val referenceCandidates =
+                    listOf(
+                        doc.getString("referenceNumber"),
+                        doc.getString("referenceId"),
+                        doc.getString("reference"),
+                        doc.getString("bankReferenceNumber"),
+                        doc.getString("transactionReference"),
+                        doc.getString("ocrReferenceId")
+                    ).filterNotNull()
+
+                val candidateIdentifiers =
+                    listOf(tid, ocrTid)
+                        .plus(referenceCandidates)
+                        .map(::normalizeIdentifier)
+                        .filter { it.length >= 6 }
+                        .distinct()
+
+                if (candidateIdentifiers.isEmpty()) continue
+
+                /*
+                 * IMPORTANT:
+                 * For the dealer flow, the exact matched SMS is the proof.
+                 * Once it is inside the configured matching window, its age
+                 * (today / yesterday / older within the chosen window) does
+                 * NOT block automatic verification.
+                 *
+                 * The exact TID/reference match is still mandatory, so this
+                 * is not an amount-only auto-credit path.
+                 */
+                val matchedEntry =
+                    smsEntries.firstOrNull { sms ->
+                        candidateIdentifiers.any { identifier ->
+                            sms.normalizedBody.contains(identifier)
+                        }
+                    }
+
+                if (matchedEntry == null) {
+                    continue
+                }
+
+                val txnData =
+                    doc.data ?: continue
+
+                DealerPaymentVerifier.verifyAndCredit(
+                    context,
+                    doc.id,
+                    txnData
+                ) { success ->
+                    if (success) {
+                        Log.d(
+                            TAG,
+                            "LIVE FRESH SMS MATCHED: txn=${doc.id}, " +
+                                    "TID=$tid, smsDate=${matchedEntry.dateMillis}"
+                        )
+                    } else {
+                        Log.d(
+                            TAG,
+                            "LIVE match found but transaction was already claimed: ${doc.id}"
+                        )
+                    }
+                }
+
+                matchedCount++
+            }
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "scanLivePending failed: ${e.message}",
+                e
+            )
+        }
+
+        return matchedCount
+    }
+
     /** @return number of dealer transactions matched (verified+credited,
      * OR flagged NEEDS_REVIEW) this run. */
     fun scanAllPending(context: Context): Int {
@@ -50,13 +221,21 @@ object DealerPaymentSmsScanner {
         try {
             val db = FirebaseFirestore.getInstance()
             val snapshot = Tasks.await(
-                db.collection("dealerTransactions").whereEqualTo("status", "PENDING").get()
+                db.collection("dealerTransactions")
+                    .whereIn("status", listOf("PENDING", "NEEDS_REVIEW"))
+                    .get()
             )
             if (snapshot.isEmpty) return 0
 
-            val matchWindowDays = SmsMatchSettingsActivity.getMatchWindowDays(context)
-            val windowStart = System.currentTimeMillis() - (matchWindowDays * 24L * 60L * 60L * 1000L)
+            val matchWindowDays =
+                SmsMatchSettingsActivity.getMatchWindowDays(context)
+                    .coerceAtLeast(1)
+
             val todayStart = startOfTodayMillis()
+            val cal = Calendar.getInstance()
+            cal.timeInMillis = todayStart
+            cal.add(Calendar.DAY_OF_YEAR, -(matchWindowDays - 1))
+            val windowStart = cal.timeInMillis
 
             val uri = Telephony.Sms.Inbox.CONTENT_URI
             val projection = arrayOf(Telephony.Sms.BODY, Telephony.Sms.DATE)
@@ -68,61 +247,115 @@ object DealerPaymentSmsScanner {
             context.contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
                 ?.use { c ->
                     while (c.moveToNext()) {
-                        val body = c.getString(c.getColumnIndexOrThrow(Telephony.Sms.BODY)) ?: ""
-                        val date = c.getLong(c.getColumnIndexOrThrow(Telephony.Sms.DATE))
-                        smsEntries.add(SmsEntry(body, date))
+                        val body =
+                            c.getString(
+                                c.getColumnIndexOrThrow(Telephony.Sms.BODY)
+                            ) ?: ""
+
+                        val date =
+                            c.getLong(
+                                c.getColumnIndexOrThrow(Telephony.Sms.DATE)
+                            )
+
+                        smsEntries.add(
+                            SmsEntry(
+                                body = body,
+                                dateMillis = date,
+                                normalizedBody = normalizeSearchText(body)
+                            )
+                        )
                     }
                 }
 
             for (doc in snapshot.documents) {
                 val tid = doc.getString("bankTransactionId") ?: ""
-                val ocrTid = doc.getString("ocrTransactionId") ?: ""
-                val dealerId = doc.getString("dealerId") ?: continue
-                val panel = doc.getString("panel")?.uppercase() ?: continue
-                val amount = doc.getDouble("amount") ?: continue
+                val ocrTid =
+                    doc.getString("ocrTransactionId") ?: ""
+
+                val referenceCandidates =
+                    listOf(
+                        doc.getString("referenceNumber"),
+                        doc.getString("referenceId"),
+                        doc.getString("reference"),
+                        doc.getString("bankReferenceNumber"),
+                        doc.getString("transactionReference"),
+                        doc.getString("ocrReferenceId")
+                    ).filterNotNull()
+
+                val dealerId =
+                    doc.getString("dealerId") ?: continue
+
+                val panel =
+                    doc.getString("panel")?.uppercase() ?: continue
+
+                val amount =
+                    doc.getDouble("amount") ?: continue
+
                 if (dealerId.isEmpty()) continue
 
                 // Match against EITHER the typed TID or the OCR-read TID —
                 // a typo in one shouldn't block a match if the other is
                 // correct.
-                val matchedEntry = smsEntries.firstOrNull {
-                    (tid.isNotEmpty() && it.body.contains(tid, ignoreCase = true)) ||
-                            (ocrTid.isNotEmpty() && it.body.contains(ocrTid, ignoreCase = true))
+                val candidateIdentifiers =
+                    listOf(tid, ocrTid)
+                        .plus(referenceCandidates)
+                        .map(::normalizeIdentifier)
+                        .filter { it.isNotBlank() }
+                        .distinct()
+
+                /*
+                 * Primary proof: exact TID/reference identity after
+                 * formatting normalization. This fixes SMS formats such as:
+                 *   1234-5678-9012
+                 *   1234 5678 9012
+                 *   TID:123456789012
+                 * all resolving to the same identifier.
+                 */
+                val matchedEntry = smsEntries.firstOrNull { sms ->
+                    candidateIdentifiers.any { identifier ->
+                        identifier.length >= 6 &&
+                                sms.normalizedBody.contains(identifier)
+                    }
                 }
                 if (matchedEntry == null) continue
 
                 val txnData = doc.data ?: continue
 
-                if (matchedEntry.dateMillis >= todayStart) {
-                    // Matched SMS is from today — safe to auto-credit,
-                    // same trust level as the live receiver.
-                    DealerPaymentVerifier.verifyAndCredit(context, doc.id, txnData) { success ->
-                        if (success) {
-                            Log.d(TAG, "Match found for TID $tid — credited $dealerId ($panel, Rs.$amount)")
-                            // TEMPORARILY DISABLED per explicit request:
-                            // tapping this notification was re-triggering
-                            // the panel transfer, causing a DUPLICATE
-                            // payment. The credit + auto-transfer logic
-                            // above is unaffected — only this popup is off.
-                            // DealerPaymentNotificationHelper.showCreditedNotification(context, dealerId, panel, amount)
-                        }
-                    }
-                    matchedCount++
-                } else {
-                    // Matched SMS is from an earlier day — hold for
-                    // manual review instead of auto-crediting. Does NOT
-                    // touch the dealer's balance.
-                    db.collection("dealerTransactions").document(doc.id)
-                        .update(
-                            mapOf(
-                                "status" to "NEEDS_REVIEW",
-                                "matchedSmsBody" to matchedEntry.body.take(200),
-                                "matchedSmsDate" to matchedEntry.dateMillis
-                            )
+                /*
+                 * DEALER RULE:
+                 * An exact matched SMS inside the configured matching window
+                 * is immediately treated as verified, regardless of the SMS
+                 * date. This removes the old Review & Verify / Confirm / Send
+                 * chain for dealer payments.
+                 *
+                 * Store the matched SMS proof before verification so the
+                 * transaction keeps its audit trail.
+                 */
+                db.collection("dealerTransactions")
+                    .document(doc.id)
+                    .update(
+                        mapOf(
+                            "smsMatched" to true,
+                            "matchedSmsBody" to matchedEntry.body.take(500),
+                            "matchedSmsDate" to matchedEntry.dateMillis
                         )
-                    Log.d(TAG, "Match found for TID $tid but SMS is from an earlier day — held as NEEDS_REVIEW for $dealerId")
-                    matchedCount++
+                    )
+
+                DealerPaymentVerifier.verifyAndCredit(
+                    context,
+                    doc.id,
+                    txnData
+                ) { success ->
+                    if (success) {
+                        Log.d(
+                            TAG,
+                            "Dealer exact SMS match AUTO-VERIFIED: " +
+                                    "TID=$tid dealer=$dealerId panel=$panel Rs.$amount"
+                        )
+                    }
                 }
+
+                matchedCount++
             }
         } catch (e: Exception) {
             Log.e(TAG, "scanAllPending failed: ${e.message}")

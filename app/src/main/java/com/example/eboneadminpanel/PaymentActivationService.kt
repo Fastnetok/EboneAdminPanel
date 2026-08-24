@@ -16,8 +16,25 @@ import com.google.firebase.firestore.ListenerRegistration
 class PaymentActivationService : Service() {
 
     private var listener: ListenerRegistration? = null
+    // NEW: second listener, dedicated to dealer payments — reuses the
+    // exact same "always-alive Foreground Service + Firestore
+    // snapshot listener" pattern that already works reliably for
+    // customer activation on this device. This is the fix for the
+    // dealer auto-trigger not firing: it no longer depends on
+    // Android's SMS_RECEIVED broadcast reaching a background receiver
+    // at all — instead, the moment a new PENDING dealerTransactions
+    // doc appears (dealer submits their proof, whenever that happens —
+    // even hours after the actual bank SMS arrived), this
+    // already-running service reacts immediately and runs the existing
+    // DealerPaymentSmsScanner, which finds the SMS (if it's already
+    // sitting in the inbox from earlier) and completes the whole
+    // verify+credit+auto-transfer chain right then.
+    private var dealerListener: ListenerRegistration? = null
     private val db = FirebaseFirestore.getInstance()
     private val processedTransactionIds = mutableSetOf<String>()
+    // NEW: separate processed-set for dealer transactions, so the two
+    // listeners never interfere with each other's dedupe tracking.
+    private val processedDealerTransactionIds = mutableSetOf<String>()
 
     companion object {
         const val CHANNEL_ID = "payment_activation_channel_v2"
@@ -30,6 +47,7 @@ class PaymentActivationService : Service() {
         createNotificationChannel()
         startForeground(FOREGROUND_ID, buildForegroundNotification())
         startListening()
+        startDealerListening()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -53,6 +71,8 @@ class PaymentActivationService : Service() {
 
         listener?.remove()
         listener = null
+        dealerListener?.remove()
+        dealerListener = null
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -114,6 +134,52 @@ class PaymentActivationService : Service() {
                         }
                     }
                 }
+            }
+    }
+
+    /**
+     * NEW: reacts immediately whenever a new dealer payment appears as
+     * PENDING — reusing the SAME already-running Foreground Service
+     * that reliably handles customer activation. Calls the existing,
+     * already-built DealerPaymentSmsScanner (same matching engine as
+     * the manual "Check Payment" / 🔄 retry button), which finds the
+     * matching SMS if it's already sitting in the inbox — including
+     * one that arrived hours earlier, before the dealer even
+     * submitted their proof — and completes verify + credit + the
+     * existing automatic panel transfer, with zero manual tap needed.
+     */
+    private fun startDealerListening() {
+        dealerListener = db.collection("dealerTransactions")
+            .whereEqualTo("status", "PENDING")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Dealer listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                val hasNewPending = snapshot?.documents?.any { doc ->
+                    !processedDealerTransactionIds.contains(doc.id)
+                } ?: false
+
+                if (!hasNewPending) return@addSnapshotListener
+
+                snapshot?.documents?.forEach { doc ->
+                    processedDealerTransactionIds.add(doc.id)
+                }
+
+                Log.d(TAG, "New dealer PENDING payment(s) detected — running scanner immediately.")
+
+                // Same matching engine the manual 🔄 retry button uses —
+                // exact TID/reference match against the configured SMS
+                // window, then verify + credit + auto-transfer.
+                Thread {
+                    try {
+                        val matched = DealerPaymentSmsScanner.scanAllPending(this@PaymentActivationService)
+                        Log.d(TAG, "Dealer auto-scan (foreground service trigger) completed. matched=$matched")
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Dealer auto-scan (foreground service trigger) failed", t)
+                    }
+                }.start()
             }
     }
 
@@ -294,6 +360,8 @@ class PaymentActivationService : Service() {
 
         listener?.remove()
         listener = null
+        dealerListener?.remove()
+        dealerListener = null
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

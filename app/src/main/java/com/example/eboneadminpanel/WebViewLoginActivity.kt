@@ -315,11 +315,31 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private fun securePrefs(name: String): android.content.SharedPreferences {
         val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        return EncryptedSharedPreferences.create(
-            this, name, masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        return try {
+            EncryptedSharedPreferences.create(
+                this, name, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // NEW: self-heal from Android Keystore "VERIFICATION_FAILED"
+            // crashes. This happens when the encrypted prefs file on
+            // disk was written with an OLD Keystore key that no longer
+            // exists (e.g. Android's Auto Backup restored the old
+            // encrypted XML file after an uninstall/reinstall, but the
+            // hardware-bound Keystore key itself is never backed up —
+            // so the restored data can never be decrypted again). Wipe
+            // the corrupted file and create a fresh one instead of
+            // crashing every time this prefs file is touched.
+            android.util.Log.e("WebViewLoginActivity", "Corrupted encrypted prefs '$name' — recreating fresh", e)
+            getSharedPreferences(name, MODE_PRIVATE).edit().clear().commit()
+            deleteSharedPreferences(name)
+            EncryptedSharedPreferences.create(
+                this, name, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
     }
 
     private fun getPrefsName() = when (selectedIsp) {

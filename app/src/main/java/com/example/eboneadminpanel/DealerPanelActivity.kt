@@ -486,6 +486,7 @@ class DealerPanelActivity : AppCompatActivity() {
 
                 relevantDocs.forEach { document ->
                     val status = document.getString("status") ?: "PENDING"
+                    val transferStatus = document.getString("transferStatus") ?: ""
                     val panel = document.getString("panel") ?: "?"
                     val amount = document.getDouble("amount") ?: 0.0
                     val tid = document.getString("bankTransactionId") ?: ""
@@ -493,20 +494,62 @@ class DealerPanelActivity : AppCompatActivity() {
 
                     when (status) {
                         "PENDING" -> pendingList.addView(
-                            swipeToDeleteWrapper(waitingRow(document.id, panel, amount, tid)) {
+                            swipeToDeleteWrapper(
+                                waitingRow(document.id, panel, amount, tid)
+                            ) {
                                 deletePendingPayment(document.id)
                             }
                         )
+
                         "NEEDS_REVIEW" -> pendingList.addView(
-                            swipeToDeleteWrapper(needsReviewRow(document.id, panel, amount, tid, document)) {
+                            swipeToDeleteWrapper(
+                                needsReviewRow(
+                                    document.id,
+                                    panel,
+                                    amount,
+                                    tid,
+                                    document
+                                )
+                            ) {
                                 deletePendingPayment(document.id)
                             }
                         )
-                        else -> pendingList.addView(
-                            swipeToDeleteWrapper(sendNowRow(document.id, dealerId, panel, amount, tid)) {
-                                deletePendingPayment(document.id)
+
+                        "VERIFIED" -> {
+                            /*
+                             * LIVE/TODAY verified payments must never expose
+                             * the old manual Send Now chain. The verifier is
+                             * already responsible for starting the existing
+                             * DEALER_TOPUP automation.
+                             */
+                            when (transferStatus) {
+                                "AUTO_SENDING" -> pendingList.addView(
+                                    swipeToDeleteWrapper(
+                                        autoSendingRow(
+                                            panel,
+                                            amount,
+                                            tid
+                                        )
+                                    ) {
+                                        deletePendingPayment(document.id)
+                                    }
+                                )
+
+                                "AUTO_FAILED" -> pendingList.addView(
+                                    swipeToDeleteWrapper(
+                                        autoFailedRow(
+                                            panel = panel,
+                                            amount = amount,
+                                            tid = tid,
+                                            error = document.getString("transferError")
+                                                .orEmpty()
+                                        )
+                                    ) {
+                                        deletePendingPayment(document.id)
+                                    }
+                                )
                             }
-                        )
+                        }
                     }
                 }
             }
@@ -788,6 +831,92 @@ class DealerPanelActivity : AppCompatActivity() {
                     }
                 }
         }
+    }
+
+    private fun autoSendingRow(
+        panel: String,
+        amount: Double,
+        tid: String
+    ): LinearLayout {
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = outlinedPill(
+                Color.parseColor("#E8F8EE"),
+                green,
+                12
+            )
+            layoutParams = LinearLayout.LayoutParams(-1, -2).also {
+                it.bottomMargin = dp(8)
+            }
+        }
+
+        row.addView(TextView(this).apply {
+            text = "✓"
+            textSize = 18f
+            setTextColor(green)
+            setPadding(0, 0, dp(10), 0)
+        })
+
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = "$panel  —  Rs. ${"%.0f".format(amount)}"
+                textSize = 13f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.parseColor("#18794E"))
+            })
+
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = "TID: $tid  •  Verified — automatic transfer in progress"
+                textSize = 11f
+                setTextColor(textMuted)
+            })
+        })
+
+        return row
+    }
+
+    private fun autoFailedRow(
+        panel: String,
+        amount: Double,
+        tid: String,
+        error: String
+    ): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = outlinedPill(
+                Color.parseColor("#FEECEC"),
+                Color.parseColor("#D92D20"),
+                12
+            )
+            layoutParams = LinearLayout.LayoutParams(-1, -2).also {
+                it.bottomMargin = dp(8)
+            }
+        }
+
+        row.addView(TextView(this).apply {
+            text = "⚠ $panel  —  Rs. ${"%.0f".format(amount)}"
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.parseColor("#B42318"))
+        })
+
+        row.addView(TextView(this).apply {
+            text = if (error.isBlank()) {
+                "TID: $tid  •  Automatic transfer failed"
+            } else {
+                "TID: $tid  •  $error"
+            }
+            textSize = 11f
+            setTextColor(textMuted)
+            setPadding(0, dp(3), 0, 0)
+        })
+
+        return row
     }
 
     /** NEW: a payment already verified by SMS matching but not yet sent
