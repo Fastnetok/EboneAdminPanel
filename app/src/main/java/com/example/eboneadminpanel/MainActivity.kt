@@ -92,6 +92,16 @@ class MainActivity : AppCompatActivity(),
 
         VersionChecker.checkForUpdate(this)
 
+        findViewById<TextView>(R.id.dealerPanelButton).setOnClickListener {
+            startActivity(Intent(this, DealerPanelActivity::class.java))
+        }
+
+        // NEW: "Active" quick link next to Dealer — opens Customer
+        // Billing directly.
+        findViewById<TextView>(R.id.activeCustomersButton).setOnClickListener {
+            startActivity(Intent(this, CustomerBillingActivity::class.java))
+        }
+
         findViewById<TextView>(R.id.menuButton)
             .setOnClickListener {
 

@@ -19,12 +19,29 @@ class BiometricAttendanceActivity : AppCompatActivity() {
     private val db = FirebaseDatabase.getInstance()
     private var selectedDeviceId = ""
     private var selectedEmployee = ""
+    // Stores the most recently loaded "All Employees" attendance data so
+    // that tapping Present/Absent/Late/Score while in All-Employees mode
+    // can show a per-employee breakdown for the full month.
+    private var allEmpAttData: Map<String, Map<String, DataSnapshot>> = emptyMap()
+    private var allEmpOverridesData: Map<String, Map<String, DataSnapshot>> = emptyMap()
+    private var allEmpMonthKey = ""
+    private var allEmpTotalDays = 0
+    private var allEmpTodayDay = 0
     private var currentMonthOffset = 0
     private var baseSalary = 0.0
     private var officeStartHour = 10
     private var officeStartMinute = 0
     private var officeEndHour = 22
     private var officeEndMinute = 0
+    // FIX: these existed only on the Employee app side (with silent
+    // defaults). The Admin panel never loaded or exposed them, and the
+    // Office Hours save button hardcoded gracePeriodMinutes to 15 while
+    // never touching preShift/postShift at all — so Admin's chosen values
+    // never actually reached Firebase. Now tracked here so the edit dialog
+    // can show and save the Admin's real selection.
+    private var gracePeriodMinutes = 15
+    private var preShiftMinutes = 60
+    private var postShiftMinutes = 60
 
     private lateinit var tvMonth: TextView
     private lateinit var tvPresent: TextView
@@ -380,27 +397,79 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         val etEndMin = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             setText("$officeEndMinute")
-            layoutParams = llp()
+            layoutParams = llp().also { it.bottomMargin = px(10, dp) }
         }
         layout.addView(etEndMin)
 
+        // FIX (requested): Grace Period, Pre-Shift Window, and Post-Shift
+        // Window are now real, editable, variable settings — 15/30/45/60
+        // minutes each — instead of grace being silently hardcoded to 15
+        // and pre/post-shift never being saved from the Admin panel at all.
+        val minuteOptions = arrayOf("15 minutes", "30 minutes", "45 minutes", "60 minutes")
+        fun minutesToIndex(m: Int) = when (m) { 15 -> 0; 30 -> 1; 45 -> 2; 60 -> 3; else -> 3 }
+
+        layout.addView(tv("Grace Period (Late Threshold)", 12f, Color.parseColor("#757575")).also {
+            it.layoutParams = llp().also { m -> m.topMargin = px(4, dp); m.bottomMargin = px(4, dp) }
+        })
+        val spinnerGrace = Spinner(this).apply {
+            adapter = ArrayAdapter(this@BiometricAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, minuteOptions)
+            setSelection(minutesToIndex(gracePeriodMinutes))
+            layoutParams = llp().also { it.bottomMargin = px(10, dp) }
+        }
+        layout.addView(spinnerGrace)
+
+        layout.addView(tv("Pre-Shift Window (Early Check-in Allowed)", 12f, Color.parseColor("#757575")).also {
+            it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
+        })
+        val spinnerPreShift = Spinner(this).apply {
+            adapter = ArrayAdapter(this@BiometricAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, minuteOptions)
+            setSelection(minutesToIndex(preShiftMinutes))
+            layoutParams = llp().also { it.bottomMargin = px(10, dp) }
+        }
+        layout.addView(spinnerPreShift)
+
+        layout.addView(tv("Post-Shift Window (Overtime Threshold)", 12f, Color.parseColor("#757575")).also {
+            it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
+        })
+        val spinnerPostShift = Spinner(this).apply {
+            adapter = ArrayAdapter(this@BiometricAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, minuteOptions)
+            setSelection(minutesToIndex(postShiftMinutes))
+            layoutParams = llp()
+        }
+        layout.addView(spinnerPostShift)
+
+        val scroll = android.widget.ScrollView(this).apply { addView(layout) }
+
         AlertDialog.Builder(this)
             .setTitle("Edit Office Hours")
-            .setView(layout)
+            .setView(scroll)
             .setPositiveButton("Save") { _, _ ->
                 val sh = etStartHour.text.toString().toIntOrNull() ?: return@setPositiveButton
                 val sm = etStartMin.text.toString().toIntOrNull() ?: 0
                 val eh = etEndHour.text.toString().toIntOrNull() ?: return@setPositiveButton
                 val em = etEndMin.text.toString().toIntOrNull() ?: 0
+                val grace = (spinnerGrace.selectedItemPosition + 1) * 15
+                val preShift = (spinnerPreShift.selectedItemPosition + 1) * 15
+                val postShift = (spinnerPostShift.selectedItemPosition + 1) * 15
                 val data = mapOf(
                     "startHour" to sh, "startMinute" to sm,
                     "endHour" to eh, "endMinute" to em,
-                    "gracePeriodMinutes" to 15
+                    "gracePeriodMinutes" to grace,
+                    "preShiftMinutes" to preShift,
+                    "postShiftMinutes" to postShift
                 )
-                db.getReference("officeSettings").setValue(data)
+                // FIX: was setValue(data), which REPLACES the entire
+                // officeSettings node and silently wiped out any other
+                // fields (e.g. complaintRadiusMeters) that this dialog
+                // doesn't manage. updateChildren() only touches the fields
+                // listed above and leaves everything else in Firebase intact.
+                db.getReference("officeSettings").updateChildren(data)
                     .addOnSuccessListener {
                         officeStartHour = sh; officeStartMinute = sm
                         officeEndHour = eh; officeEndMinute = em
+                        gracePeriodMinutes = grace
+                        preShiftMinutes = preShift
+                        postShiftMinutes = postShift
                         updateOfficeHoursLabel()
                         loadAttendanceReport()
                     }
@@ -599,25 +668,42 @@ class BiometricAttendanceActivity : AppCompatActivity() {
 
         // Load all employees attendance
         val attData = mutableMapOf<String, Map<String, DataSnapshot>>() // name -> date -> snap
+        // FIX (bug: 320 absent on "All Employees"): overrides (Full Day
+        // Relief / paid leave) were never fetched here, so paid-leave days
+        // were wrongly counted as absent. Fetch them the same way the
+        // single-employee report already does.
+        val overridesData = mutableMapOf<String, Map<String, DataSnapshot>>() // name -> date -> override snap
         var loaded = 0
 
         allNames.forEach { name ->
             val did = employeeMap[name] ?: run { loaded++; return@forEach }
-            db.getReference("attendance").child(did)
-                .orderByKey().startAt("${monthKey}-01").endAt("${monthKey}-31")
-                .get()
-                .addOnSuccessListener { snap ->
-                    attData[name] = snap.children.associateBy { it.key ?: "" }
-                    loaded++
-                    if (loaded >= allNames.size) {
-                        runOnUiThread { renderAllEmployeesLog(attData, totalDaysInMonth, todayDay, monthKey, dp) }
-                    }
+            db.getReference("adminOverrides").child(did).get()
+                .addOnSuccessListener { overrideSnap ->
+                    overridesData[name] = overrideSnap.children.associateBy { it.key ?: "" }
+                    db.getReference("attendance").child(did)
+                        .orderByKey().startAt("${monthKey}-01").endAt("${monthKey}-31")
+                        .get()
+                        .addOnSuccessListener { snap ->
+                            attData[name] = snap.children.associateBy { it.key ?: "" }
+                            loaded++
+                            if (loaded >= allNames.size) {
+                                runOnUiThread { renderAllEmployeesLog(attData, overridesData, totalDaysInMonth, todayDay, monthKey, dp) }
+                            }
+                        }
+                        .addOnFailureListener {
+                            attData[name] = emptyMap()
+                            loaded++
+                            if (loaded >= allNames.size) {
+                                runOnUiThread { renderAllEmployeesLog(attData, overridesData, totalDaysInMonth, todayDay, monthKey, dp) }
+                            }
+                        }
                 }
                 .addOnFailureListener {
+                    overridesData[name] = emptyMap()
                     attData[name] = emptyMap()
                     loaded++
                     if (loaded >= allNames.size) {
-                        runOnUiThread { renderAllEmployeesLog(attData, totalDaysInMonth, todayDay, monthKey, dp) }
+                        runOnUiThread { renderAllEmployeesLog(attData, overridesData, totalDaysInMonth, todayDay, monthKey, dp) }
                     }
                 }
         }
@@ -625,10 +711,32 @@ class BiometricAttendanceActivity : AppCompatActivity() {
 
     private fun renderAllEmployeesLog(
         attData: Map<String, Map<String, DataSnapshot>>,
+        overridesData: Map<String, Map<String, DataSnapshot>>,
         totalDays: Int, todayDay: Int, monthKey: String, dp: Float
     ) {
+        // Save for the Present/Absent/Late/Score stat-box detail popups.
+        allEmpAttData = attData
+        allEmpOverridesData = overridesData
+        allEmpMonthKey = monthKey
+        allEmpTotalDays = totalDays
+        allEmpTodayDay = todayDay
+
         logContainer.removeAllViews()
         val names = attData.keys.sorted()
+
+        // FIX (bug: 320 absent on "All Employees"): work out each
+        // employee's first present day this month, exactly like the
+        // single-employee report does, so days before an employee's first
+        // check-in (e.g. newly joined mid-month) are never counted absent.
+        val firstPresentDayMap = mutableMapOf<String, Int>()
+        names.forEach { name ->
+            val recs = attData[name] ?: emptyMap()
+            val presentKeys = recs.filter { readDayAttendance(it.value) != null }.keys
+            firstPresentDayMap[name] = if (presentKeys.isNotEmpty()) {
+                try { presentKeys.sorted().first().split("-").last().toInt() }
+                catch (e: Exception) { todayDay }
+            } else todayDay + 1 // no record at all this month -> never counts as absent
+        }
 
         // Stats across all employees
         var totalPresent = 0; var totalLate = 0; var totalAbsent = 0
@@ -660,9 +768,16 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 val checkOut = dayAtt?.checkOut ?: ""
                 val status = if (dayAtt?.isLate == true) "LATE" else if (dayAtt?.hasOvertimeSession == true) "OVERTIME" else ""
 
-                if (checkIn.isNotEmpty()) totalPresent++
+                // FIX (bug: 320 absent on "All Employees"): respect Full Day
+                // Relief (paid leave) overrides, and never count a day
+                // before the employee's first-ever check-in as absent.
+                val override = overridesData[name]?.get(dayKey)
+                val fullRelief = override?.child("fullRelief")?.value as? Boolean ?: false
+                val firstDay = firstPresentDayMap[name] ?: (todayDay + 1)
+
+                if (checkIn.isNotEmpty() || fullRelief) totalPresent++
                 if (status == "LATE") totalLate++
-                if (checkIn.isEmpty()) totalAbsent++
+                if (checkIn.isEmpty() && !fullRelief && d >= firstDay) totalAbsent++
 
                 val empRow = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -920,6 +1035,9 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             officeStartMinute = (snap.child("startMinute").value as? Long)?.toInt() ?: 0
             officeEndHour = (snap.child("endHour").value as? Long)?.toInt() ?: 22
             officeEndMinute = (snap.child("endMinute").value as? Long)?.toInt() ?: 0
+            gracePeriodMinutes = (snap.child("gracePeriodMinutes").value as? Long)?.toInt() ?: 15
+            preShiftMinutes = (snap.child("preShiftMinutes").value as? Long)?.toInt() ?: 60
+            postShiftMinutes = (snap.child("postShiftMinutes").value as? Long)?.toInt() ?: 60
             updateOfficeHoursLabel()
         }
     }
@@ -1227,6 +1345,125 @@ class BiometricAttendanceActivity : AppCompatActivity() {
 
     // ─────────────── STAT DETAIL ───────────────
 
+    /**
+     * When "── All Employees ──" is selected, tapping Present / Absent /
+     * Late / Score shows this per-employee breakdown for the full month
+     * (respecting the same firstPresentDay + Full Day Relief rules used for
+     * the top totals) instead of the single-employee day list.
+     * "Late" shows TOTAL HOURS late this month per employee (not a count).
+     */
+    private fun showAllEmployeesStatDetail(type: String) {
+        if (allEmpAttData.isEmpty()) { showMsg("No data loaded yet."); return }
+        val dp = resources.displayMetrics.density
+        val monthKey = allEmpMonthKey
+        val totalDays = allEmpTotalDays
+        val todayDay = allEmpTodayDay
+        val names = allEmpAttData.keys.sorted()
+
+        data class EmpStat(val name: String, val present: Int, val absent: Int, val lateMinutes: Long, val score: Int)
+        val stats = mutableListOf<EmpStat>()
+
+        names.forEach { name ->
+            val recs = allEmpAttData[name] ?: emptyMap()
+            val overrides = allEmpOverridesData[name] ?: emptyMap()
+            val presentKeys = recs.filter { readDayAttendance(it.value) != null }.keys
+            val firstPresentDay = if (presentKeys.isNotEmpty()) {
+                try { presentKeys.sorted().first().split("-").last().toInt() }
+                catch (e: Exception) { todayDay }
+            } else todayDay + 1
+
+            var present = 0; var absent = 0; var lateMins = 0L
+            for (d in 1..totalDays) {
+                val isFuture = currentMonthOffset == 0 && d > todayDay
+                if (isFuture) continue
+                val dayKey = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
+                val rec = recs[dayKey]
+                val dayAtt = rec?.let { readDayAttendance(it) }
+                val override = overrides[dayKey]
+                val fullRelief = override?.child("fullRelief")?.value as? Boolean ?: false
+                val checkIn = dayAtt?.checkIn ?: ""
+                val ciTs = dayAtt?.ciTs ?: 0L
+
+                if (checkIn.isNotEmpty() || fullRelief) present++
+                if (checkIn.isEmpty() && !fullRelief && d >= firstPresentDay) absent++
+
+                // Total hours late this month = sum of (check-in time - office start time) for every late day.
+                if (checkIn.isNotEmpty() && ciTs > 0) {
+                    val officeStartMs = Calendar.getInstance().also {
+                        it.timeInMillis = ciTs
+                        it.set(Calendar.HOUR_OF_DAY, officeStartHour)
+                        it.set(Calendar.MINUTE, officeStartMinute)
+                        it.set(Calendar.SECOND, 0)
+                    }.timeInMillis
+                    if (ciTs > officeStartMs) lateMins += (ciTs - officeStartMs) / 60000
+                }
+            }
+            val scoreDays = (todayDay - firstPresentDay + 1).coerceAtLeast(1)
+            val score = if (presentKeys.isNotEmpty())
+                ((present.toFloat() / scoreDays) * 100).toInt().coerceIn(0, 100)
+            else 0
+            stats.add(EmpStat(name, present, absent, lateMins, score))
+        }
+
+        val sorted = when (type) {
+            "Late" -> stats.sortedByDescending { it.lateMinutes }
+            "Absent" -> stats.sortedByDescending { it.absent }
+            "Present" -> stats.sortedByDescending { it.present }
+            "Score" -> stats.sortedByDescending { it.score }
+            else -> stats
+        }
+
+        val scroll = android.widget.ScrollView(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(12, dp), px(8, dp), px(12, dp), px(8, dp))
+        }
+        scroll.addView(container)
+
+        sorted.forEachIndexed { i, s ->
+            val lateHrsTotal = s.lateMinutes / 60.0
+            val lateH = (s.lateMinutes / 60)
+            val lateM = (s.lateMinutes % 60)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(if (i % 2 == 0) Color.parseColor("#FAFAFA") else Color.WHITE)
+                setPadding(px(12, dp), px(12, dp), px(12, dp), px(12, dp))
+            }
+            row.addView(tv(s.name, 14f, Color.parseColor("#111111"), bold = true).also {
+                it.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+
+            // Only show the single metric relevant to the box that was tapped.
+            val (valueText, valueColor) = when (type) {
+                "Present" -> "${s.present} days" to "#2E7D32"
+                "Absent" -> "${s.absent} days" to "#C62828"
+                "Late" -> (if (lateHrsTotal > 0) "${lateH}h ${lateM}m" else "0h 0m") to "#E65100"
+                "Score" -> "${s.score}%" to "#1565C0"
+                else -> "" to "#555555"
+            }
+            row.addView(tv(valueText, 13f, Color.parseColor(valueColor), bold = true))
+            container.addView(row)
+            container.addView(View(this).apply {
+                setBackgroundColor(Color.parseColor("#EEEEEE"))
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+            })
+        }
+
+        if (sorted.isEmpty()) {
+            container.addView(tv("No employees found.", 13f, Color.parseColor("#9E9E9E")).also {
+                it.gravity = Gravity.CENTER
+                it.setPadding(0, px(20, dp), 0, px(20, dp))
+            })
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("$type — All Employees (${getMonthLabel()})")
+            .setView(scroll)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
     private fun showStatDetail(type: String) {
         if (selectedDeviceId.isEmpty()) { showMsg("Select an employee first."); return }
         val monthKey = getMonthKey()
@@ -1259,12 +1496,18 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 } else todayDay
 
                 var count = 0
+                // FIX (restoring the previously-built total logic): sums up
+                // late minutes across the month so we can show a "Total
+                // Late Hours" line at the bottom, the same way the Employee
+                // app's own Time Log / stat detail does.
+                var totalLateMinsThisMonth = 0
                 for (d in 1..totalDays) {
                     val dayKey = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
                     val rec = recordMap[dayKey]
                     val dayAtt = rec?.let { readDayAttendance(it) }
                     val ci = dayAtt?.checkIn ?: ""
                     val co = dayAtt?.checkOut ?: ""
+                    val ciTs = dayAtt?.ciTs ?: 0L
                     val st = if (dayAtt?.isLate == true) "LATE" else if (dayAtt?.hasOvertimeSession == true) "OVERTIME" else ""
                     val isFuture = currentMonthOffset == 0 && d > todayDay
                     if (isFuture) continue
@@ -1274,6 +1517,15 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                         "Late" -> st == "LATE"
                         "Score" -> true
                         else -> false
+                    }
+                    if (type == "Late" && st == "LATE" && ciTs > 0) {
+                        val officeStartMs = Calendar.getInstance().also {
+                            it.timeInMillis = ciTs
+                            it.set(Calendar.HOUR_OF_DAY, officeStartHour)
+                            it.set(Calendar.MINUTE, officeStartMinute)
+                            it.set(Calendar.SECOND, 0)
+                        }.timeInMillis
+                        if (ciTs > officeStartMs) totalLateMinsThisMonth += ((ciTs - officeStartMs) / 60000).toInt()
                     }
                     if (!show) continue
                     count++
@@ -1306,6 +1558,27 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                     })
                 }
                 if (count == 0) container.addView(tv("No records.", 13f, Color.parseColor("#9E9E9E")).also { it.gravity = Gravity.CENTER; it.setPadding(0, px(20, dp), 0, px(20, dp)) })
+
+                // FIX (restoring the previously-built total logic): a line
+                // drawn under the column of figures, then the sum — exactly
+                // like adding up a column of numbers on paper.
+                if (count > 0 && type != "Score") {
+                    container.addView(View(this).apply {
+                        setBackgroundColor(Color.parseColor("#333333"))
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(2, dp)).also { it.topMargin = px(6, dp); it.bottomMargin = px(8, dp) }
+                    })
+                    val totalText = when (type) {
+                        "Present" -> "Total Present: $count days"
+                        "Absent" -> "Total Absent: $count days"
+                        "Late" -> "Total Late Hours: ${totalLateMinsThisMonth / 60}h ${totalLateMinsThisMonth % 60}m"
+                        else -> ""
+                    }
+                    val totalColor = when (type) { "Absent" -> "#C62828"; "Late" -> "#E65100"; else -> "#2E7D32" }
+                    container.addView(tv(totalText, 14f, Color.parseColor(totalColor), bold = true).also {
+                        it.setPadding(0, 0, 0, px(6, dp))
+                    })
+                }
+
                 AlertDialog.Builder(this).setTitle("$type — $count").setView(scroll).setPositiveButton("Close", null).show()
             }
     }
@@ -1393,7 +1666,14 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         setPadding(px(8, dp), px(12, dp), px(8, dp), px(12, dp))
         background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = 8f * dp; setColor(Color.WHITE); setStroke(px(1, dp), Color.parseColor("#DDDDDD")) }
         isClickable = true; isFocusable = true
-        setOnClickListener { showStatDetail(label) }
+        setOnClickListener {
+            // If "── All Employees ──" is the active selection, show the
+            // per-employee breakdown instead of a single employee's day list.
+            if (selectedDeviceId.isEmpty() && selectedEmployee.isEmpty() && allEmpAttData.isNotEmpty())
+                showAllEmployeesStatDetail(label)
+            else
+                showStatDetail(label)
+        }
         addView(v)
         addView(tv(label, 11f, Color.parseColor("#555555")).also { it.gravity = Gravity.CENTER })
     }

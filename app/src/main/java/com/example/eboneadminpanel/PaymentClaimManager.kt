@@ -276,8 +276,20 @@ object PaymentClaimManager {
         smsBody: String
     ): String {
         val rawIdentity = if (identifier.isNotBlank()) {
-            "ID|$source|$identifierType|$identifier"
+            // CRITICAL: source is deliberately NOT part of this key.
+            // The whole point of a TID/Reference match is that it's the
+            // real bank/wallet transaction id — it must be treated as
+            // globally unique across the ENTIRE system regardless of
+            // whether the customer flow labeled it "EasyPaisa" and the
+            // dealer flow labeled it "DEALER_TOPUP". Including source
+            // here would let the exact same real transaction be claimed
+            // once per differently-labeled source, defeating the
+            // customer-vs-dealer duplicate check entirely.
+            "ID|$identifierType|$identifier"
         } else {
+            // The SMS-fingerprint fallback (no identifier available) has
+            // no such global identity to rely on, so source still helps
+            // narrow an otherwise loose amount+fingerprint match.
             val normalizedAmount =
                 String.format(Locale.US, "%.2f", amount)
 

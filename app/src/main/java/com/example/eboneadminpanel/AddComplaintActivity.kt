@@ -31,16 +31,27 @@ class AddComplaintActivity : AppCompatActivity() {
         val loginButton = findViewById<Button>(R.id.ocrButton)
         val assignButton = findViewById<Button>(R.id.assignComplaintButton)
 
+        // Selected company is kept only for the current complaint flow.
+        var selectedCompany = ""
+
         loginButton.setOnClickListener {
             val ispList = arrayOf(
                 "Ebone (ebill.pk)",
-                "Wateen (wateen.com)"
+                "Wateen (wateen.com)",
+                "Zong (turbonet.zong.com.pk)"
             )
 
             androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Select ISP")
                 .setItems(ispList) { _, which ->
-                    val selectedISP = if (which == 0) "EBONE" else "WATEEN"
+                    val selectedISP = when (which) {
+                        0 -> "EBONE"
+                        1 -> "WATEEN"
+                        else -> "ZONG"
+                    }
+
+                    selectedCompany = selectedISP
+
                     val intent = Intent(this, WebViewLoginActivity::class.java)
                     intent.putExtra("selected_isp", selectedISP)
                     webViewLauncher.launch(intent)
@@ -60,7 +71,6 @@ class AddComplaintActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // Firebase se employees load karein
             FirebaseDatabase.getInstance()
                 .getReference("employees")
                 .get()
@@ -70,6 +80,7 @@ class AddComplaintActivity : AppCompatActivity() {
                     for (child in snapshot.children) {
                         val name = child.child("employeeName")
                             .getValue(String::class.java) ?: ""
+
                         if (name.isNotEmpty()) {
                             employeeNames.add(name)
                         }
@@ -84,21 +95,24 @@ class AddComplaintActivity : AppCompatActivity() {
                         return@addOnSuccessListener
                     }
 
-                    // Employee select dialog
                     androidx.appcompat.app.AlertDialog.Builder(this)
                         .setTitle("Select Employee")
                         .setItems(employeeNames.toTypedArray()) { _, which ->
                             val selectedEmployee = employeeNames[which]
 
-                            // Repeat check karein
                             repeatManager.checkRepeatComplaint(userId) { repeatInfo ->
                                 if (repeatInfo.isRepeat) {
                                     val resolveDate = if (repeatInfo.lastResolvedTime > 0) {
-                                        SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
-                                            .format(Date(repeatInfo.lastResolvedTime))
+                                        SimpleDateFormat(
+                                            "dd-MM-yyyy",
+                                            Locale.getDefault()
+                                        ).format(
+                                            Date(repeatInfo.lastResolvedTime)
+                                        )
                                     } else {
                                         "Unknown"
                                     }
+
                                     Toast.makeText(
                                         this,
                                         "⚠️ Repeat Complaint\n" +
@@ -109,12 +123,13 @@ class AddComplaintActivity : AppCompatActivity() {
                                     ).show()
                                 }
 
-                                // Complaint banao aur assign karo
                                 val complaintId = FirebaseDatabase
                                     .getInstance()
                                     .getReference("complaints")
                                     .push()
                                     .key ?: return@checkRepeatComplaint
+
+                                val currentTime = System.currentTimeMillis()
 
                                 val complaint = Complaint(
                                     complaintId = complaintId,
@@ -122,10 +137,11 @@ class AddComplaintActivity : AppCompatActivity() {
                                     address = address,
                                     phoneNumber = phone,
                                     details = details,
+                                    company = selectedCompany,
                                     status = "Progress",
                                     assignedTo = selectedEmployee,
-                                    assignedTime = System.currentTimeMillis(),
-                                    createdTime = System.currentTimeMillis()
+                                    assignedTime = currentTime,
+                                    createdTime = currentTime
                                 )
 
                                 FirebaseDatabase.getInstance()
@@ -133,7 +149,6 @@ class AddComplaintActivity : AppCompatActivity() {
                                     .child(complaintId)
                                     .setValue(complaint)
                                     .addOnSuccessListener {
-                                        // Employee notification bhejein
                                         val notifRef = FirebaseDatabase.getInstance()
                                             .getReference("employeeNotifications")
                                             .child(selectedEmployee)
@@ -153,6 +168,7 @@ class AddComplaintActivity : AppCompatActivity() {
                                             "Complaint assigned to $selectedEmployee",
                                             Toast.LENGTH_SHORT
                                         ).show()
+
                                         finish()
                                     }
                                     .addOnFailureListener {
@@ -176,13 +192,27 @@ class AddComplaintActivity : AppCompatActivity() {
         ) { result ->
             if (result.resultCode == RESULT_OK) {
                 val data = result.data
-                val fetchedUserId = data?.getStringExtra("fetched_user_id") ?: ""
-                val fetchedAddress = data?.getStringExtra("fetched_address") ?: ""
-                val fetchedPhone = data?.getStringExtra("fetched_phone") ?: ""
 
-                if (fetchedUserId.isNotEmpty()) userIdInput.setText(fetchedUserId)
-                if (fetchedAddress.isNotEmpty()) addressInput.setText(fetchedAddress)
-                if (fetchedPhone.isNotEmpty()) phoneInput.setText(fetchedPhone)
+                val fetchedUserId =
+                    data?.getStringExtra("fetched_user_id") ?: ""
+
+                val fetchedAddress =
+                    data?.getStringExtra("fetched_address") ?: ""
+
+                val fetchedPhone =
+                    data?.getStringExtra("fetched_phone") ?: ""
+
+                if (fetchedUserId.isNotEmpty()) {
+                    userIdInput.setText(fetchedUserId)
+                }
+
+                if (fetchedAddress.isNotEmpty()) {
+                    addressInput.setText(fetchedAddress)
+                }
+
+                if (fetchedPhone.isNotEmpty()) {
+                    phoneInput.setText(fetchedPhone)
+                }
             }
         }
 }

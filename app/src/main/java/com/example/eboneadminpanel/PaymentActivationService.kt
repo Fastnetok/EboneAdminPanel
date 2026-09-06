@@ -174,7 +174,7 @@ class PaymentActivationService : Service() {
                 // window, then verify + credit + auto-transfer.
                 Thread {
                     try {
-                        val matched = DealerPaymentSmsScanner.scanAllPending(this@PaymentActivationService)
+                        val matched = DealerPaymentSmsScanner.scanAllPending(this@PaymentActivationService, "foreground_service_listener")
                         Log.d(TAG, "Dealer auto-scan (foreground service trigger) completed. matched=$matched")
                     } catch (t: Throwable) {
                         Log.e(TAG, "Dealer auto-scan (foreground service trigger) failed", t)

@@ -43,7 +43,7 @@ object DealerPaymentSmsScanner {
         return cal.timeInMillis
     }
 
-    fun scanLivePending(context: Context): Int {
+    fun scanLivePending(context: Context, source: String = "sms_receiver_live_scan"): Int {
         var matchedCount = 0
 
         try {
@@ -168,24 +168,43 @@ object DealerPaymentSmsScanner {
                  * The exact TID/reference match is still mandatory, so this
                  * is not an amount-only auto-credit path.
                  */
+                var matchedIdentifier: String? = null
                 val matchedEntry =
                     smsEntries.firstOrNull { sms ->
-                        candidateIdentifiers.any { identifier ->
+                        val hit = candidateIdentifiers.firstOrNull { identifier ->
                             sms.normalizedBody.contains(identifier)
+                        }
+                        if (hit != null) {
+                            matchedIdentifier = hit
+                            true
+                        } else {
+                            false
                         }
                     }
 
-                if (matchedEntry == null) {
+                if (matchedEntry == null || matchedIdentifier == null) {
                     continue
                 }
 
                 val txnData =
                     doc.data ?: continue
 
-                DealerPaymentVerifier.verifyAndCredit(
-                    context,
-                    doc.id,
-                    txnData
+                val dealerId = doc.getString("dealerId") ?: continue
+                val amount = (doc.get("amount") as? Number)?.toDouble() ?: 0.0
+                val identifierType = identifierTypeOf(matchedIdentifier!!, tid, ocrTid)
+
+                claimThenVerify(
+                    context = context,
+                    doc = doc,
+                    dealerId = dealerId,
+                    matchedIdentifier = matchedIdentifier!!,
+                    identifierType = identifierType,
+                    amount = amount,
+                    submittedAt = submittedAt,
+                    smsTimestamp = matchedEntry.dateMillis,
+                    smsBody = matchedEntry.body,
+                    txnData = txnData,
+                    source = source
                 ) { success ->
                     if (success) {
                         Log.d(
@@ -196,7 +215,7 @@ object DealerPaymentSmsScanner {
                     } else {
                         Log.d(
                             TAG,
-                            "LIVE match found but transaction was already claimed: ${doc.id}"
+                            "LIVE match found but transaction was already claimed or rejected as duplicate: ${doc.id}"
                         )
                     }
                 }
@@ -216,7 +235,7 @@ object DealerPaymentSmsScanner {
 
     /** @return number of dealer transactions matched (verified+credited,
      * OR flagged NEEDS_REVIEW) this run. */
-    fun scanAllPending(context: Context): Int {
+    fun scanAllPending(context: Context, source: String = "unspecified_scan_all"): Int {
         var matchedCount = 0
         try {
             val db = FirebaseFirestore.getInstance()
@@ -311,15 +330,23 @@ object DealerPaymentSmsScanner {
                  *   TID:123456789012
                  * all resolving to the same identifier.
                  */
+                var matchedIdentifier: String? = null
                 val matchedEntry = smsEntries.firstOrNull { sms ->
-                    candidateIdentifiers.any { identifier ->
+                    val hit = candidateIdentifiers.firstOrNull { identifier ->
                         identifier.length >= 6 &&
                                 sms.normalizedBody.contains(identifier)
                     }
+                    if (hit != null) {
+                        matchedIdentifier = hit
+                        true
+                    } else {
+                        false
+                    }
                 }
-                if (matchedEntry == null) continue
+                if (matchedEntry == null || matchedIdentifier == null) continue
 
                 val txnData = doc.data ?: continue
+                val identifierType = identifierTypeOf(matchedIdentifier!!, tid, ocrTid)
 
                 /*
                  * DEALER RULE:
@@ -341,10 +368,18 @@ object DealerPaymentSmsScanner {
                         )
                     )
 
-                DealerPaymentVerifier.verifyAndCredit(
-                    context,
-                    doc.id,
-                    txnData
+                claimThenVerify(
+                    context = context,
+                    doc = doc,
+                    dealerId = dealerId,
+                    matchedIdentifier = matchedIdentifier!!,
+                    identifierType = identifierType,
+                    amount = amount,
+                    submittedAt = doc.getLong("submittedAt") ?: System.currentTimeMillis(),
+                    smsTimestamp = matchedEntry.dateMillis,
+                    smsBody = matchedEntry.body,
+                    txnData = txnData,
+                    source = source
                 ) { success ->
                     if (success) {
                         Log.d(
@@ -361,5 +396,101 @@ object DealerPaymentSmsScanner {
             Log.e(TAG, "scanAllPending failed: ${e.message}")
         }
         return matchedCount
+    }
+
+    private fun identifierTypeOf(matched: String, tid: String, ocrTid: String): String {
+        val normalizedTid = normalizeIdentifier(tid)
+        val normalizedOcrTid = normalizeIdentifier(ocrTid)
+        return if (matched == normalizedTid || matched == normalizedOcrTid) "TID" else "REFERENCE"
+    }
+
+    /**
+     * Shared cross-app duplicate gate.
+     *
+     * Before this transaction is allowed to credit the dealer's balance,
+     * it must pass through the SAME central PaymentClaimManager the
+     * customer-payment flow (PaymentSmsScanner) already uses. This is
+     * what stops the exact same real bank transaction from being used
+     * TWICE across two different apps — once by a customer to activate
+     * their package, and separately by a dealer to top up their panel
+     * balance (or vice-versa) — since both flows ultimately run inside
+     * this one Admin Panel and both scan the same phone's SMS inbox.
+     *
+     * On a genuine duplicate, this dealer transaction is marked
+     * REJECTED_DUPLICATE with exactly who used it first and when, so the
+     * admin can show the dealer/customer concerned proof instead of
+     * guessing — and, critically, verifyAndCredit is never called, so no
+     * balance is credited and no panel automation is ever launched for
+     * a payment that was already used elsewhere.
+     */
+    private fun claimThenVerify(
+        context: Context,
+        doc: com.google.firebase.firestore.DocumentSnapshot,
+        dealerId: String,
+        matchedIdentifier: String,
+        identifierType: String,
+        amount: Double,
+        submittedAt: Long,
+        smsTimestamp: Long,
+        smsBody: String,
+        txnData: Map<String, Any>,
+        source: String,
+        onDone: (Boolean) -> Unit
+    ) {
+        PaymentClaimManager.claim(
+            PaymentClaimManager.ClaimRequest(
+                ownerType = PaymentClaimManager.OWNER_DEALER,
+                ownerId = dealerId,
+                ownerName = dealerId,
+                paymentSource = "DEALER_TOPUP",
+                identifierType = identifierType,
+                identifier = matchedIdentifier,
+                amount = amount,
+                submittedAt = submittedAt,
+                smsTimestamp = smsTimestamp,
+                transactionId = doc.id
+            ),
+            smsBody = smsBody
+        ) { result ->
+            when (result) {
+                is PaymentClaimManager.ClaimResult.Claimed -> {
+                    DealerPaymentVerifier.verifyAndCredit(context, doc.id, txnData, source, onDone)
+                }
+                is PaymentClaimManager.ClaimResult.Duplicate -> {
+                    val whenText = if (result.originalTransactionId.isNotBlank())
+                        " (their record: ${result.originalTransactionId})" else ""
+                    val message = "This TID/reference was already used by " +
+                            "${result.originalOwnerType} \"${result.originalOwnerName.ifBlank { result.originalOwnerId }}\"" +
+                            "$whenText — cannot be credited again here."
+                    Log.w(
+                        TAG,
+                        "DEALER DUPLICATE REJECTED: txn=${doc.id} dealer=$dealerId — $message"
+                    )
+                    FirebaseFirestore.getInstance()
+                        .collection("dealerTransactions")
+                        .document(doc.id)
+                        .update(
+                            mapOf(
+                                "status" to "REJECTED_DUPLICATE",
+                                "duplicateOriginalOwnerType" to result.originalOwnerType,
+                                "duplicateOriginalOwnerId" to result.originalOwnerId,
+                                "duplicateOriginalOwnerName" to result.originalOwnerName,
+                                "duplicateOriginalTransactionId" to result.originalTransactionId,
+                                "duplicateDetectedAt" to System.currentTimeMillis(),
+                                "duplicateMessage" to message
+                            )
+                        )
+                    onDone(false)
+                }
+                is PaymentClaimManager.ClaimResult.Invalid -> {
+                    Log.e(TAG, "Invalid dealer claim for txn=${doc.id}: ${result.reason}")
+                    onDone(false)
+                }
+                is PaymentClaimManager.ClaimResult.Failed -> {
+                    Log.e(TAG, "Dealer claim failed for txn=${doc.id}", result.error)
+                    onDone(false)
+                }
+            }
+        }
     }
 }

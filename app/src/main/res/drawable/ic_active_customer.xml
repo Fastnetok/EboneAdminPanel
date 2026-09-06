@@ -1,0 +1,40 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="26dp"
+    android:height="26dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!--
+        FIX: reusing the EXACT same two-person shapes as ic_dealer.xml
+        (already confirmed to look right), just with a small clock badge
+        added in the bottom-right corner — instead of the earlier
+        separate single-person design, which came out looking wrong.
+    -->
+
+    <!-- Back person — lighter blue -->
+    <path
+        android:fillColor="#90CAF9"
+        android:pathData="M15,5.7 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0" />
+    <path
+        android:fillColor="#90CAF9"
+        android:pathData="M11,16 C11,12.5 12.5,10.8 15,10.8 C17.5,10.8 19,12.5 19,16 Z" />
+
+    <!-- Front person — deep blue, drawn on top -->
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M8,7.6 m-2.9,0 a2.9,2.9 0 1,0 5.8,0 a2.9,2.9 0 1,0 -5.8,0" />
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M2.8,17 C2.8,12.9 4.9,10.7 8,10.7 C11.1,10.7 13.2,12.9 13.2,17 Z" />
+
+    <!-- Small clock badge, bottom-right corner -->
+    <path
+        android:fillColor="#FB8C00"
+        android:pathData="M18.8,18.2 m-4.4,0 a4.4,4.4 0 1,0 8.8,0 a4.4,4.4 0 1,0 -8.8,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.3"
+        android:strokeLineCap="round"
+        android:pathData="M18.8,15.4 L18.8,18.2 L20.8,19.4" />
+</vector>

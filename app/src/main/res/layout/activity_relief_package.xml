@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Relief / Update Package"
+            android:textColor="#0D2E5C"
+            android:textSize="21sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:text="Search customer and manage relief"
+            android:textColor="#6B7280"
+            android:textSize="12sp" />
+
+        <!-- Company -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Company"
+            android:textColor="#0D2E5C"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <AutoCompleteTextView
+            android:id="@+id/etCompany"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Select Company"
+            android:inputType="text"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textSize="14sp" />
+
+        <!-- Customer Search -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Customer ID"
+            android:textColor="#0D2E5C"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <AutoCompleteTextView
+            android:id="@+id/etCustomerId"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:hint="Search Customer ID"
+            android:inputType="text"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textSize="14sp" />
+
+        <!-- Search status -->
+        <TextView
+            android:id="@+id/tvSearchStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text=""
+            android:textColor="#6B7280"
+            android:textSize="11sp" />
+
+        <!-- Customer Card -->
+        <LinearLayout
+            android:id="@+id/customerCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_stat_card"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Selected Customer"
+                android:textColor="#0D2E5C"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCustomerId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Customer ID: -"
+                android:textColor="#111827"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCompany"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Company: -"
+                android:textColor="#374151"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tvPackage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Package: -"
+                android:textColor="#374151"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Status: -"
+                android:textColor="#374151"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tvReliefStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="Relief: -"
+                android:textColor="#374151"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/tvCountdown"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Remaining: --"
+                android:textColor="#C62828"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+        <!-- Add Permanent User -->
+        <Button
+            android:id="@+id/btnAddPermanentUser"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="14dp"
+            android:text="ADD TO PERMANENT USERS"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- Relief Days -->
+        <TextView
+            android:id="@+id/tvReliefDaysLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Relief Duration"
+            android:textColor="#0D2E5C"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/reliefDaysContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/btnRelief1Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_weight="1"
+                android:text="1 Day"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnRelief2Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="2 Days"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnRelief3Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="3 Days"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnRelief4Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="4 Days"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/reliefDaysContainer2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/btnRelief5Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_weight="1"
+                android:text="5 Days"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnRelief6Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="6 Days"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnRelief7Day"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="7 Days"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/btnCustomRelief"
+                android:layout_width="0dp"
+                android:layout_height="45dp"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:text="Custom"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+        <!-- Action buttons -->
+        <Button
+            android:id="@+id/btnActivateRelief"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="18dp"
+            android:text="ACTIVATE ON RELIEF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnReactivate"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:text="REACTIVATE / CLEAR RELIEF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvActionResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:text=""
+            android:textSize="12sp" />
+
+        <!-- Active Relief -->
+        <LinearLayout
+            android:id="@+id/activeReliefSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:background="@drawable/bg_stat_card"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ACTIVE RELIEF"
+                android:textColor="#0D2E5C"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvActiveReliefCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="0"
+                android:textColor="#C62828"
+                android:textSize="25sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Active Relief List"
+            android:textColor="#0D2E5C"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/activeReliefListContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical" />
+
+    </LinearLayout>
+
+</ScrollView>

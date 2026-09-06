@@ -17,8 +17,8 @@ class ComplaintAdapter(
     val selectedComplaints =
         mutableListOf<Complaint>()
 
-    class ViewHolder(itemView: View)
-        : RecyclerView.ViewHolder(itemView) {
+    class ViewHolder(itemView: View) :
+        RecyclerView.ViewHolder(itemView) {
 
         val checkComplaint: CheckBox =
             itemView.findViewById(
@@ -53,6 +53,11 @@ class ComplaintAdapter(
         val dateText: TextView =
             itemView.findViewById(
                 R.id.dateText
+            )
+
+        val tvLogCompany: TextView =
+            itemView.findViewById(
+                R.id.tvLogCompany
             )
     }
 
@@ -93,10 +98,11 @@ class ComplaintAdapter(
             "Assigned To : " +
                     if (
                         complaint.assignedTo.isEmpty()
-                    )
+                    ) {
                         "Not Assigned"
-                    else
+                    } else {
                         complaint.assignedTo
+                    }
 
         holder.statusText.text =
             "Status : " +
@@ -114,6 +120,24 @@ class ComplaintAdapter(
                     complaint.createdTime
                 )
             )
+
+        // Company Badge
+        val company =
+            complaint.company.trim().uppercase(Locale.getDefault())
+
+        if (company.isEmpty()) {
+
+            holder.tvLogCompany.visibility =
+                View.GONE
+
+        } else {
+
+            holder.tvLogCompany.visibility =
+                View.VISIBLE
+
+            holder.tvLogCompany.text =
+                company
+        }
 
         holder.checkComplaint.setOnCheckedChangeListener(null)
 

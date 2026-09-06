@@ -19,11 +19,10 @@ import kotlinx.coroutines.withContext
  * still ACTIVE, and raises a "Tap to suspend" notification for each —
  * mirroring PaymentNotificationHelper's "Tap to activate" pattern.
  *
- * Actually performing the suspend still needs a tap (opens
- * WebViewLoginActivity with manual_action=SUSPEND) because a real ISP
- * portal login only works from a foreground WebView, not headlessly —
- * exactly the same constraint the SMS-payment activation flow already
- * works within.
+ * FIX: added whereEqualTo("reliefStatus", "ACTIVE") so this ONLY ever
+ * fires for customers actually placed on Relief from Unpaid Package
+ * Activation — never for an ordinary customer whose graceDeadline field
+ * happened to be stale/set for an unrelated reason.
  */
 class GraceDeadlineWorker(context: Context, params: WorkerParameters) :
     CoroutineWorker(context, params) {
@@ -45,6 +44,7 @@ class GraceDeadlineWorker(context: Context, params: WorkerParameters) :
 
         val snapshot = db.collection("customers")
             .whereEqualTo("activationStatus", "ACTIVE")
+            .whereEqualTo("reliefStatus", "ACTIVE")
             .whereLessThan("graceDeadline", now)
             .get()
             .await()

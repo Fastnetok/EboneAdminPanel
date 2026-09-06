@@ -114,16 +114,72 @@
 
     </LinearLayout>
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="LIVE EMPLOYEE TRACKING"
-        android:textStyle="bold"
-        android:textSize="20sp"
-        android:textColor="#444444"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:paddingStart="10dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="6dp" />
+        android:paddingEnd="8dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="LIVE TRACKING"
+            android:textStyle="bold"
+            android:textSize="20sp"
+            android:textColor="#444444" />
+
+        <TextView
+            android:id="@+id/dealerPanelButton"
+            android:layout_width="58dp"
+            android:layout_height="54dp"
+            android:gravity="center"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:text="Dealer"
+            android:textColor="#444444"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:drawableTop="@drawable/ic_dealer"
+            android:drawablePadding="0dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Dealer" />
+
+        <!--
+            FIX: rebuilt as a SINGLE TextView with drawableTop, using the
+            EXACT SAME width/height/padding/gravity/textSize/textStyle as
+            the Dealer TextView right above it — that structural mismatch
+            (Dealer = one TextView, old Active = LinearLayout + separate
+            ImageView + TextView) is exactly why no amount of padding
+            tweaking could ever make them align. Same view type + same
+            properties now guarantees the same vertical alignment.
+        -->
+        <TextView
+            android:id="@+id/activeCustomersButton"
+            android:layout_width="58dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:gravity="center"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:text="Active"
+            android:textColor="#444444"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:drawableTop="@drawable/ic_active_customer"
+            android:drawablePadding="0dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Active" />
+
+    </LinearLayout>
 
     <fragment
         android:id="@+id/dashboardMap"

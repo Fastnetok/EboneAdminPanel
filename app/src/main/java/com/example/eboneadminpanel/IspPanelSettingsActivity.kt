@@ -56,6 +56,12 @@ class IspPanelSettingsActivity : AppCompatActivity() {
          * on its default), and the code silently fell back to Okara's
          * account — logging into the wrong franchise without any
          * warning.
+         *
+         * IMPORTANT: this function is Franchise-first by design (Pass 1
+         * always checks non-dealer accounts before dealer accounts). Do
+         * NOT use this when a specific NAMED dealer must be used — use
+         * getDealerUsername/getDealerPassword below instead, which never
+         * falls back to the Franchise account.
          */
         fun getSavedUsername(context: Context, isp: String, zone: String = "Okara"): String? {
             val arr = safeAccountsArray(context) ?: return null
@@ -119,6 +125,51 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                         }
                     } catch (_: Exception) { }
                 }
+            }
+            return null
+        }
+
+        /**
+         * NEW: looks up ONE SPECIFIC named dealer's username (e.g. EBONE's
+         * "Akmal" dealer), matching isp + zone + dealerName exactly
+         * (case-insensitive on the name). Unlike getSavedUsername, this
+         * NEVER falls back to a Franchise (non-dealer) account and NEVER
+         * matches a different dealer — if this named dealer isn't saved,
+         * it returns null so the caller can show a clear error instead of
+         * silently logging in as the wrong account.
+         */
+        fun getDealerUsername(context: Context, isp: String, zone: String, dealerName: String): String? {
+            val arr = safeAccountsArray(context) ?: return null
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp &&
+                        obj.optBoolean("isDealer", false) &&
+                        accountZone(obj) == zone &&
+                        obj.optString("dealerName", "").equals(dealerName, ignoreCase = true)
+                    ) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { }
+            }
+            return null
+        }
+
+        /** NEW: password counterpart of getDealerUsername above — same
+         * exact-match rules, same no-Franchise-fallback guarantee. */
+        fun getDealerPassword(context: Context, isp: String, zone: String, dealerName: String): String? {
+            val arr = safeAccountsArray(context) ?: return null
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp &&
+                        obj.optBoolean("isDealer", false) &&
+                        accountZone(obj) == zone &&
+                        obj.optString("dealerName", "").equals(dealerName, ignoreCase = true)
+                    ) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
             }
             return null
         }

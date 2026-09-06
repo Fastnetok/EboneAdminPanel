@@ -1,0 +1,444 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+    FIX: previously the ScrollView was the direct root, so the "Header"
+    row (back button + "Unpaid Package Activation" title) rendered right
+    at the very top of the screen — sitting exactly where the phone's own
+    status bar (clock/battery/signal icons) is drawn, with no distinct
+    background behind it.
+
+    Now the true root is this outer vertical LinearLayout with two parts:
+      1) A fixed blue accent bar at the very top (~12mm tall), so the
+         phone's status bar area shows against a blue background instead
+         of blending into the app.
+      2) The existing ScrollView (completely unchanged inside), which now
+         starts ~12mm lower than before.
+
+    Nothing inside the ScrollView was touched — every id, margin and
+    view referenced from UnpaidPackageActivationActivity.kt is exactly
+    where it was before. No Kotlin changes are needed for this fix.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F4F6FA">
+
+    <!--
+        NEW: top accent bar. Height is ~12mm (76dp at baseline density —
+        1mm ≈ 6.3dp). Sits flush against the very top edge of the screen,
+        behind the phone's status bar, so the clock/battery/signal icons
+        appear on a blue background instead of the plain app background.
+        Purely decorative — not clickable, no id needed.
+    -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="76dp"
+        android:background="#0D47A1" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#F4F6FA"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Header -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="10dp">
+
+                <ImageButton
+                    android:id="@+id/btnBack"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Back"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_arrow_back"
+                    app:tint="#0D2E5C" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="Unpaid Package Activation"
+                    android:textColor="#0D2E5C"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+
+                <Space
+                    android:layout_width="42dp"
+                    android:layout_height="1dp" />
+
+            </LinearLayout>
+
+            <!--
+                Dropdown showing everyone currently on Relief. Tapping it
+                opens a scrollable list (title shows the count). A user drops
+                off this list automatically the moment their reliefStatus is
+                cleared — whether by early payment (Re-activate button) or by
+                the automatic suspend flow.
+            -->
+            <LinearLayout
+                android:id="@+id/btnReliefActiveList"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_spinner"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/tvReliefActiveCount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Relief Active Users (0)"
+                    android:textColor="#0D2E5C"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="#0D2E5C" />
+
+            </LinearLayout>
+
+            <!--
+                Dropdown showing everyone CURRENTLY DISABLED (reliefStatus
+                == "SUSPENDED") — separate from Relief Active above. A user
+                appears here the moment a SUSPEND completes (whether via the
+                real day-based relief cycle or the DISABLE NOW test button),
+                and disappears automatically the instant they're re-enabled.
+            -->
+            <LinearLayout
+                android:id="@+id/btnDisabledUsersList"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_spinner"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:clickable="true"
+                android:focusable="true">
+
+                <TextView
+                    android:id="@+id/tvDisabledUsersCount"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Disabled Users (0)"
+                    android:textColor="#C62828"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="#C62828" />
+
+            </LinearLayout>
+
+            <!-- Company -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Company"
+                android:textColor="#0D2E5C"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <!--
+                FrameLayout overlay so a visible dropdown arrow always
+                shows on the right, regardless of how @drawable/bg_spinner
+                renders. The arrow is purely decorative (not clickable) so
+                taps still go straight through to the Spinner underneath.
+            -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="6dp">
+
+                <Spinner
+                    android:id="@+id/spinnerCompany"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/bg_spinner"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="32dp" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center_vertical|end"
+                    android:layout_marginEnd="12dp"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="#0D2E5C" />
+
+            </FrameLayout>
+
+            <!--
+                The URL row is no longer shown — the underlying
+                etCustomerUrl view and all the navigation logic that reads
+                its value are UNCHANGED and still work exactly as before
+                (auto-filled from the company's default panel domain); it's
+                simply not visible to the operator anymore since it wasn't
+                being used for manual input.
+            -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="URL"
+                android:textColor="#0D2E5C"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <EditText
+                android:id="@+id/etCustomerUrl"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_spinner"
+                android:clickable="true"
+                android:focusable="false"
+                android:inputType="textUri"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true"
+                android:textColor="#1F2937"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <!-- Search Customer -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Search Customer"
+                android:textColor="#0D2E5C"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <AutoCompleteTextView
+                android:id="@+id/etCustomerSearch"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_spinner"
+                android:clickable="true"
+                android:completionThreshold="1"
+                android:drawableEnd="@drawable/ic_arrow_drop_down"
+                android:drawablePadding="8dp"
+                android:focusable="true"
+                android:hint="Customer ID / Name"
+                android:inputType="text"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true" />
+
+            <!-- Customer Information -->
+            <TextView
+                android:id="@+id/tvCustomer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Customer: —"
+                android:textColor="#1F2937"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/tvCustomerId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Customer ID: —"
+                android:textColor="#1F2937"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/tvPackage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Package: —"
+                android:textColor="#1F2937"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/tvPackagePrice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Package Price: Rs 0"
+                android:textColor="#1F2937"
+                android:textSize="14sp" />
+
+            <!-- Save New User -->
+            <Button
+                android:id="@+id/btnSaveNewUser"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="18dp"
+                android:text="SAVE NEW USER"
+                android:textAllCaps="false"
+                android:visibility="gone" />
+
+            <!-- Relief Period -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="Relief Period"
+                android:textColor="#0D2E5C"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+
+            <!--
+                Instant manual test buttons — DISABLE NOW / ENABLE NOW.
+                These bypass WorkManager entirely (Android will never run a
+                periodic worker more often than every 15 minutes, no matter
+                what — this is an Android platform limit, not something the
+                app can configure around). Pressing these triggers the exact
+                same SUSPEND/ENABLE flow immediately, for whichever customer
+                is currently selected/searched above, so the password
+                capture-and-restore mechanism can be verified right away.
+            -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnTestDisableNow"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="6dp"
+                    android:backgroundTint="#C62828"
+                    android:text="DISABLE NOW"
+                    android:textColor="#FFFFFF"
+                    android:textAllCaps="false"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnTestEnableNow"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:backgroundTint="#2E7D32"
+                    android:text="ENABLE NOW"
+                    android:textColor="#FFFFFF"
+                    android:textAllCaps="false"
+                    android:textSize="13sp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <HorizontalScrollView
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/quickDaysContainer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="match_parent"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal" />
+
+                </HorizontalScrollView>
+
+                <ImageButton
+                    android:id="@+id/btnCalendar"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_spinner"
+                    android:contentDescription="Select relief date"
+                    android:padding="10dp"
+                    android:src="@android:drawable/ic_menu_my_calendar"
+                    app:tint="#0D2E5C" />
+
+            </LinearLayout>
+
+            <!-- Dates -->
+            <TextView
+                android:id="@+id/tvStartDate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Start Date: —"
+                android:textColor="#1F2937"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/tvSuspendDate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Suspend Date: —"
+                android:textColor="#1F2937"
+                android:textSize="14sp" />
+
+            <!-- Activate -->
+            <Button
+                android:id="@+id/btnActivateRelief"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="24dp"
+                android:text="ACTIVATE ON RELIEF"
+                android:textAllCaps="false" />
+
+            <!-- Reactivate -->
+            <Button
+                android:id="@+id/btnReactivate"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="10dp"
+                android:text="RE-ACTIVATE AFTER PAYMENT"
+                android:textAllCaps="false"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </ScrollView>
+
+</LinearLayout>

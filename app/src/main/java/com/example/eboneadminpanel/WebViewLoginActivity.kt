@@ -27,36 +27,47 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private var loginDone = false
-    // Prevents tryAutoLogin() from being started twice concurrently — it
-    // was previously triggered both by a selectedIsp-specific URL branch
-    // AND a generic "safety net" ~600ms later, and both could fire
-    // before either finished, causing two overlapping fill/submit
-    // attempts to interfere with each other. Reset to false on every
-    // fresh page load. Confirmed fix — Ebone/Zong dealer recharge tested
-    // and passing with this in place.
     private var loginAttemptInProgress = false
     private var zongDealerMode = false
     private var activeAccountName = ""
     private var selectedIsp = "EBONE"
     private var autoActivateCustomerId: String? = null
     private var eboneSubmitClicked = false
+    // NEW: guards against re-capturing the password if the panel
+    // redirects back to /clients/client/{id} after a successful password
+    // change (e.g. as a "success -> back to profile" pattern). Without
+    // this, a second landing on the profile page would read the
+    // ALREADY-CHANGED password and overwrite the correct original one
+    // saved in Firestore — which is exactly what caused ENABLE to
+    // restore the wrong (new) password instead of the real original.
+    private var eboneSuspendCaptureDone = false
+    // NEW: guards ZONG's SUSPEND/ENABLE click so it only ever fires once
+    // per session. Without this, the action link's redirect back to the
+    // same customer_portal.php page (after a successful click) was being
+    // treated as a fresh request, finding the NOW-OPPOSITE action link
+    // (since the status just flipped) and clicking THAT too — silently
+    // undoing the action it had just performed (disable -> re-enable, or
+    // enable -> re-disable).
+    private var zongActionClicked = false
     private var transactionId: String? = null
     private val db by lazy { FirebaseFirestore.getInstance() }
 
     private var manualAction: String? = null
 
+    private var eboneOriginalPassword: String? = null
+
     private var dealerEboneId: String? = null
     private var topupAmount: String? = null
     private var eboneTopupSubmitAttempted = false
+    private var eboneTopupSubmitAttempt = 0
+    private var eboneTopupVerificationAttempt = 0
+    private var eboneTopupSuccessConfirmed = false
     private var eboneBalanceCheckAttempted = false
 
     private var wateenDealerListLoadAttempted = false
     private var wateenDealerSearchAttempted = false
     private var wateenTopupSubmitAttempted = false
     private var wateenBalanceCheckAttempted = false
-    // Wateen balance-read retry rule: the dashboard may render the
-    // "My Balance" card after onPageFinished. Keep retrying until the
-    // card is actually present instead of failing after one early read.
     private var wateenBalanceReadAttempt = 0
 
     private var zongDealerListLoadAttempted = false
@@ -68,24 +79,38 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private var dealerSearchName: String? = null
 
-    // NEW: which zone/franchise's login to use (Okara/Renala/etc).
-    // Defaults to "Okara" so any call site that doesn't pass this yet
-    // behaves exactly like the stable single-zone version.
     private var targetZone: String = "Okara"
 
     private var sourceTransactionId: String? = null
 
     private var debugTapInspectorEnabled = false
 
-    // Zong balance diagnostic trail: records every navigation step and a
-    // small visible-text snapshot so we can identify exactly where the
-    // automatic Okara/Renala balance flow stops. Diagnostic only — it does
-    // not change the balance-reading logic.
+    // NEW: when set (via the "dealer_account_name" intent extra), the
+    // WebView must log in using this SPECIFIC named dealer account saved
+    // in IspPanelSettingsActivity (isDealer=true, dealerName matches) —
+    // never the Franchise account, even if one exists for this ISP+zone.
+    private var forceAccountName: String? = null
+    private var forcedDealerUsername: String? = null
+    private var forcedDealerPassword: String? = null
+
+    // NEW: base URL taken directly from the Unpaid Package Activation
+    // screen's URL field (e.g. "https://partner.ebill.pk"). When present,
+    // this is used as the base for building the customer's profile URL
+    // instead of WebViewLoginActivity's own hardcoded domain — this is
+    // what makes "whatever is typed in Search Customer gets appended
+    // straight onto this URL" actually work.
+    private var customerUrlOverride: String? = null
+
     private var zongNavigationStep = 0
     private var zongLastTrailUrl = ""
 
     companion object {
-        private const val EBONE_SUSPEND_PASSWORD = "8888"
+        // TEMPORARY TEST VALUE — set to "Tetra9" at the admin's explicit
+        // request, to visually confirm the capture-save-and-change flow
+        // actually writes a NEW password onto the real panel. Revert to
+        // "8888" once this test is confirmed and before relying on the
+        // real automatic Phase 7 disable flow.
+        private const val EBONE_SUSPEND_PASSWORD = "Tetra9"
         private const val EBONE_ENABLE_PASSWORD = "1001"
     }
 
@@ -98,8 +123,6 @@ class WebViewLoginActivity : AppCompatActivity() {
     private val ISP_SESSION_PREFS = "isp_session_cookies"
 
     private fun getIspSessionCookie(isp: String): String {
-        // Keyed by isp+zone — Okara's Zong session and Renala's Zong
-        // session are cached completely separately.
         return securePrefs(ISP_SESSION_PREFS).getString("${isp}_$targetZone", "") ?: ""
     }
 
@@ -117,23 +140,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * NEW: expires every cookie for ONE specific domain only, leaving
-     * every OTHER domain's cookies completely untouched. Android's
-     * CookieManager has no built-in "clear cookies for domain X only"
-     * method — removeAllCookies() is global across the whole app. This
-     * reads whatever cookie names are currently set for [domain] and
-     * individually expires each one (Max-Age=0), which only affects
-     * that domain's session.
-     *
-     * Used so that, e.g., resetting Zong's cookie before switching
-     * between Okara's and Renala's sessions (same domain,
-     * turbonet.zong.com.pk) never disturbs Ebone's or Wateen's
-     * completely separate, still-valid sessions on their own domains —
-     * preserving the "stay logged in" convenience for those (e.g. the
-     * admin Complaint screen) that a full removeAllCookies() would
-     * otherwise destroy on every single launch.
-     */
     private fun clearCookiesForDomain(domain: String) {
         val existing = CookieManager.getInstance().getCookie(domain) ?: return
         val cookieNames = existing.split(";")
@@ -203,6 +209,9 @@ class WebViewLoginActivity : AppCompatActivity() {
         sourceTransactionId = intent.getStringExtra("source_transaction_id")
         dealerSearchName = intent.getStringExtra("dealer_search_name")
         targetZone = intent.getStringExtra("target_zone")?.ifBlank { null } ?: "Okara"
+
+        forceAccountName = intent.getStringExtra("dealer_account_name")
+        customerUrlOverride = intent.getStringExtra("customer_url")?.trim()?.takeIf { it.isNotBlank() }
 
         debugTapInspectorEnabled = intent.getBooleanExtra("debug_tap_inspector", false)
 
@@ -310,7 +319,40 @@ class WebViewLoginActivity : AppCompatActivity() {
             }
         }
 
-        loadInitialPage()
+        if (!forceAccountName.isNullOrBlank() && selectedIsp == "EBONE") {
+            val dealerUsername = IspPanelSettingsActivity.getDealerUsername(
+                this, selectedIsp, targetZone, forceAccountName!!
+            )
+            val dealerPassword = IspPanelSettingsActivity.getDealerPassword(
+                this, selectedIsp, targetZone, forceAccountName!!
+            )
+
+            if (!dealerUsername.isNullOrEmpty() && !dealerPassword.isNullOrEmpty()) {
+                forcedDealerUsername = dealerUsername
+                forcedDealerPassword = dealerPassword
+
+                // CRITICAL: EBONE Franchise and EBONE dealer accounts share
+                // the exact same domain (partner.ebill.pk). If a Franchise
+                // session cookie is currently live for that domain (from
+                // any earlier use of this app), simply loading the login
+                // page could silently reuse that old Franchise session
+                // instead of showing a fresh login for this dealer. Clear
+                // the domain's cookies first so a real, fresh login as
+                // this specific dealer always happens.
+                clearCookiesForDomain(domainFor(selectedIsp))
+                loginDone = false
+                webView.loadUrl(loginUrlFor(selectedIsp))
+            } else {
+                Toast.makeText(
+                    this,
+                    "Dealer account \"$forceAccountName\" not found for $selectedIsp/$targetZone. Add it first via ISP Panel Settings → Add Dealer.",
+                    Toast.LENGTH_LONG
+                ).show()
+                loadInitialPage()
+            }
+        } else {
+            loadInitialPage()
+        }
     }
 
     private fun securePrefs(name: String): android.content.SharedPreferences {
@@ -322,15 +364,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            // NEW: self-heal from Android Keystore "VERIFICATION_FAILED"
-            // crashes. This happens when the encrypted prefs file on
-            // disk was written with an OLD Keystore key that no longer
-            // exists (e.g. Android's Auto Backup restored the old
-            // encrypted XML file after an uninstall/reinstall, but the
-            // hardware-bound Keystore key itself is never backed up —
-            // so the restored data can never be decrypted again). Wipe
-            // the corrupted file and create a fresh one instead of
-            // crashing every time this prefs file is touched.
             android.util.Log.e("WebViewLoginActivity", "Corrupted encrypted prefs '$name' — recreating fresh", e)
             getSharedPreferences(name, MODE_PRIVATE).edit().clear().commit()
             deleteSharedPreferences(name)
@@ -371,31 +404,6 @@ class WebViewLoginActivity : AppCompatActivity() {
 
         if (!ispUsername.isNullOrEmpty()) {
             val savedCookie = getIspSessionCookie(selectedIsp)
-            // Single, targeted diagnostic — shows exactly which
-            // zone/username this launch resolved to, and whether a
-            // cached session was reused vs a fresh login forced.
-
-            // CRITICAL: ALWAYS wipe every cookie first, unconditionally
-            // — for EVERY launch, not just when our own cache is empty.
-            // Android's CookieManager is a single shared jar across the
-            // whole app, keyed only by domain, with zero concept of
-            // "zone". Even though we cache each zone's session
-            // separately on OUR side, if a DIFFERENT zone's session
-            // cookie is still technically live in the real browser jar
-            // (e.g. Okara's, from any earlier login this app session),
-            // simply calling setCookie() for Renala's value does not
-            // CRITICAL: clear cookies for THIS ISP's domain ONLY —
-            // never the whole app. Android's CookieManager is a single
-            // shared jar keyed by domain, with zero concept of "zone".
-            // Okara-Zong and Renala-Zong share the SAME domain
-            // (turbonet.zong.com.pk), so clearing just that domain
-            // before restoring this zone's own saved cookie removes any
-            // stale cross-zone session cleanly. Crucially, this does
-            // NOT touch Ebone's or Wateen's cookies (different domains)
-            // — so their own persistent sessions (e.g. the Complaint
-            // screen's "already logged in" convenience) are completely
-            // unaffected, unlike the earlier removeAllCookies(null)
-            // version which wiped every ISP's session on every launch.
             clearCookiesForDomain(domainFor(selectedIsp))
 
             if (savedCookie.isNotEmpty()) {
@@ -408,11 +416,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             return
         }
 
-        // No login configured for this isp+zone combo at all. If a
-        // specific non-Okara zone was requested, still show the blank
-        // login page (browser stays visible, as requested) — just don't
-        // fall through to the old zone-unaware fallback store, which
-        // previously caused a real wrong-account incident.
         if (!targetZone.equals("Okara", ignoreCase = true)) {
             CookieManager.getInstance().removeAllCookies(null)
             CookieManager.getInstance().flush()
@@ -420,9 +423,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             return
         }
 
-        // FALLBACK: old per-ISP manual account store — only reachable
-        // for the default "Okara" zone, exactly as in the stable
-        // version.
         val accounts = loadAccounts()
         val active = securePrefs(getPrefsName()).getString(KEY_ACTIVE, "") ?: ""
         if (active.isNotEmpty() && accounts.has(active)) {
@@ -540,21 +540,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Diagnostic-only Zong navigation trail.
-     *
-     * For every page reached during CHECK_BALANCE this captures:
-     *  - sequence number
-     *  - selected zone and username
-     *  - exact URL
-     *  - page title / readyState
-     *  - first 500 chars of visible page text
-     *  - whether our balance-check guard has already fired
-     *
-     * This is deliberately kept separate from the balance parser so testing
-     * the navigation cannot accidentally change the balance value or the
-     * Firebase update path.
-     */
     private fun recordZongNavigationTrail(url: String) {
         zongNavigationStep++
         zongLastTrailUrl = url
@@ -597,11 +582,6 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun handlePageLoaded(url: String) {
-        // NEW: full navigation trail specifically for Zong balance
-        // checks — logs every single page this WebView lands on, so the
-        // exact sequence (e.g. customers.php → root, or wherever it
-        // actually goes) is visible instead of only seeing a final
-        // failure with no trail leading up to it.
         if (selectedIsp == "ZONG" && manualAction == "CHECK_BALANCE") {
             recordZongNavigationTrail(url)
         }
@@ -616,11 +596,12 @@ class WebViewLoginActivity : AppCompatActivity() {
                 loginDone = false; loginAttemptInProgress = false; tryAutoLogin()
             }
             selectedIsp == "EBONE" && url.contains("/clients/clientChange/") && manualAction != null -> {
-                fillEbonePasswordAndSubmit()
+                prepareEbonePasswordAction()
             }
             selectedIsp == "EBONE" && url.contains("/payments/addbalance/") && manualAction == "DEALER_TOPUP" -> {
-                if (!eboneTopupSubmitAttempted) {
-                    eboneTopupSubmitAttempted = true
+                if (eboneTopupSubmitAttempted && !eboneTopupSuccessConfirmed) {
+                    verifyEboneDealerTopupResult(topupAmount ?: "", eboneTopupVerificationAttempt)
+                } else if (!eboneTopupSubmitAttempted && !eboneTopupSuccessConfirmed) {
                     fillDealerTopupAmountAndSubmit()
                 }
             }
@@ -635,6 +616,35 @@ class WebViewLoginActivity : AppCompatActivity() {
                     .trimEnd('/')
                 if (urlCustomerId != autoActivateCustomerId) {
                     android.util.Log.e("WebViewLoginActivity", "Customer ID mismatch — expected $autoActivateCustomerId, got $urlCustomerId. Aborting to avoid activating wrong customer.")
+                } else if (manualAction == "SUSPEND") {
+                    // NEW: this is where the real password actually lives
+                    // — capture it here, save it, then follow the "Change"
+                    // link to set the new one. Guarded so a redirect back
+                    // to this exact page AFTER the password was already
+                    // changed never re-captures (and overwrites) the
+                    // correct original value with the new one.
+                    if (!eboneSuspendCaptureDone) {
+                        eboneSuspendCaptureDone = true
+                        captureEbonePasswordFromProfileThenChange(urlCustomerId)
+                    }
+                } else if (manualAction == "RELIEF_VIEW") {
+                    // FIX: the previous version did nothing at all here —
+                    // no finish(), no success result — which meant
+                    // UnpaidPackageActivationActivity's onActivityResult
+                    // never ran, reliefStatus stayed stuck on
+                    // "ACTIVE_PENDING" forever, GraceDeadlineWorker (which
+                    // only watches reliefStatus=="ACTIVE") never picked
+                    // the customer up even after the grace time passed,
+                    // and the Reactivate button / Relief Active list never
+                    // updated. A short visible pause (so the operator
+                    // actually sees the profile land, per the earlier
+                    // "it closed too fast" concern) is enough — after
+                    // that, report success and finish normally so the
+                    // relief cycle actually completes.
+                    webView.postDelayed({
+                        setResult(RESULT_OK, Intent().apply { putExtra("activation_success", true) })
+                        finish()
+                    }, 1500)
                 } else if (eboneSubmitClicked) {
                     fetchEboneExpiryAndFinish()
                 } else {
@@ -650,6 +660,33 @@ class WebViewLoginActivity : AppCompatActivity() {
             }
             selectedIsp == "WATEEN" && url.contains("panel.wateen.com") && url.contains("/user/user/view/") -> {
                 fetchWateenCustomerDetails()
+            }
+            selectedIsp == "ZONG" && url.contains("customer_portal.php") && autoActivateCustomerId != null && manualAction == "RELIEF_VIEW" -> {
+                // FIX: for relief activation, ZONG must ONLY confirm it
+                // reached the right customer's page (currently
+                // Active/green, since relief is only given while the
+                // connection is already running) and do NOTHING else —
+                // no click on the actionx= Disable/Enable link. This
+                // must be checked BEFORE the generic manualAction!=null
+                // branch below, which calls onZongProfileOpened() and
+                // WOULD click that link otherwise.
+                webView.postDelayed({
+                    setResult(RESULT_OK, Intent().apply { putExtra("activation_success", true) })
+                    finish()
+                }, 1500)
+            }
+            selectedIsp == "ZONG" && url.contains("customer_portal.php") && autoActivateCustomerId != null && manualAction != null -> {
+                // FIX: SUSPEND/ENABLE work directly on the Franchise
+                // account's own customer_portal.php page (confirmed via
+                // inspect — the Enable/Disable link with actionx=... is
+                // right there). This must NEVER route through
+                // onZongFranchiseProfileOpened(), which is a completely
+                // different feature that tries to find and switch into a
+                // SUB-DEALER's own separate login — not needed and not
+                // wanted here, since the admin explicitly wants the
+                // Franchise account (Abbas046) used directly, never any
+                // dealer account, for ZONG.
+                onZongProfileOpened()
             }
             selectedIsp == "ZONG" && url.contains("customer_portal.php") && autoActivateCustomerId != null && !zongDealerMode -> {
                 onZongFranchiseProfileOpened()
@@ -698,12 +735,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                         webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/dealer/dealer/all") }, 800)
                     }
                 } else if (manualAction == "CHECK_BALANCE") {
-                    // NEW: "My Balance" only exists on the root dashboard
-                    // page — reading it directly wherever we happened to
-                    // land (e.g. /user/user/all, if a cached session
-                    // cookie sent us straight there) silently failed.
-                    // Navigate to root first, then read once actually
-                    // there.
                     val onWateenRoot = !url.contains("/user/user/") && !url.contains("/dealer/dealer/")
                     if (onWateenRoot) {
                         if (!wateenBalanceCheckAttempted) {
@@ -749,12 +780,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                         webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/sub_dealers.php") }, 800)
                     }
                 } else if (manualAction == "CHECK_BALANCE") {
-                    // The "Available Credit" balance is shown in Zong's
-                    // persistent header banner — confirmed present on
-                    // multiple different page variants (index.php,
-                    // index_manager.php), just NOT on customers.php.
-                    // Read it wherever we land, as long as it's not the
-                    // customers list page.
                     val onSuitableZongPage = !url.contains("customers.php")
                     if (onSuitableZongPage) {
                         if (!zongBalanceCheckAttempted) {
@@ -803,17 +828,24 @@ class WebViewLoginActivity : AppCompatActivity() {
         if (loginAttemptInProgress) return
         loginAttemptInProgress = true
 
+        // FIX: if a specific dealer account was forced (e.g. "Akmal" via
+        // dealer_account_name), its credentials — already looked up
+        // correctly from IspPanelSettingsActivity in onCreate — MUST be
+        // used, and Franchise credentials must never be checked at all.
+        // Previously this checked IspPanelSettingsActivity.getSavedUsername
+        // first, which is Franchise-priority by design and silently
+        // overrode the forced dealer selection.
+        if (!forcedDealerUsername.isNullOrBlank() && !forcedDealerPassword.isNullOrBlank()) {
+            doLoginWith(forcedDealerUsername!!, forcedDealerPassword!!)
+            return
+        }
+
         val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp, targetZone)
         val ispPassword = IspPanelSettingsActivity.getSavedPassword(this, selectedIsp, targetZone)
         if (!ispUsername.isNullOrEmpty() && !ispPassword.isNullOrEmpty()) {
             doLoginWith(ispUsername, ispPassword)
             return
         }
-        // No login found for a specific non-Okara zone — release the
-        // guard and stop here (blank form stays visible, nothing typed,
-        // nothing submitted). Do NOT fall through to the old
-        // zone-unaware fallback store — that's what previously caused a
-        // real wrong-account incident.
         if (!targetZone.equals("Okara", ignoreCase = true)) {
             loginAttemptInProgress = false
             return
@@ -872,6 +904,15 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * FIX (relief automation): when a SUSPEND completes successfully, the
+     * customer's reliefStatus is now also set to "SUSPENDED" if they had
+     * one. This is what makes them appear in the "Relief users" list as
+     * disabled/removed from the active-relief count, and lets
+     * UnpaidPackageActivationActivity's Reactivate button correctly know
+     * a real ISP-panel restore is needed (vs. an early-payment case where
+     * the connection was never actually cut).
+     */
     private fun finishManualActionSuccess() {
         val custId = autoActivateCustomerId
         if (custId != null) {
@@ -880,8 +921,25 @@ class WebViewLoginActivity : AppCompatActivity() {
             if (manualAction == "ENABLE") {
                 updates["lastPaymentDate"] = System.currentTimeMillis()
                 updates["graceDeadline"] = FieldValue.delete()
+                updates["eboneOriginalPassword"] = FieldValue.delete()
+                updates["eboneOriginalPasswordSavedAt"] = FieldValue.delete()
+                updates["reliefStatus"] = FieldValue.delete()
+                updates["reliefTestMode"] = FieldValue.delete()
+                updates["reliefCompany"] = FieldValue.delete()
+            } else if (manualAction == "SUSPEND") {
+                updates["reliefStatus"] = "SUSPENDED"
+                if (!eboneOriginalPassword.isNullOrBlank()) {
+                    updates["eboneOriginalPasswordSavedAt"] = FieldValue.serverTimestamp()
+                }
             }
             db.collection("customers").document(custId).update(updates)
+
+            // NEW: standalone Relief Log entry — writes to its own
+            // separate "reliefLogs" collection only, never touches
+            // "customers" or anything above.
+            if (manualAction == "SUSPEND") {
+                ReliefLogRepository.logDeactivation(custId)
+            }
         }
         setResult(RESULT_OK, Intent().apply { putExtra("manual_action_success", true) })
         finish()
@@ -892,8 +950,112 @@ class WebViewLoginActivity : AppCompatActivity() {
         finish()
     }
 
+    private fun prepareEbonePasswordAction() {
+        val custId = autoActivateCustomerId?.trim().orEmpty()
+        if (custId.isEmpty()) {
+            finishManualActionFailure("EBONE Customer ID is missing")
+            return
+        }
+
+        if (manualAction == "ENABLE") {
+            if (eboneOriginalPassword.isNullOrBlank()) {
+                finishManualActionFailure("Saved original EBONE password is missing; restore aborted")
+                return
+            }
+            fillEbonePasswordAndSubmit()
+            return
+        }
+
+        if (manualAction != "SUSPEND") {
+            fillEbonePasswordAndSubmit()
+            return
+        }
+
+        // FIX: for SUSPEND, the real password is now captured earlier —
+        // directly from the profile page's plain-text "5555 Change" cell,
+        // via captureEbonePasswordFromProfileThenChange(). By the time we
+        // land here (on clientChange), eboneOriginalPassword is already
+        // set, so there's nothing left to read from this page — just fill
+        // in the new password and submit.
+        if (!eboneOriginalPassword.isNullOrBlank()) {
+            fillEbonePasswordAndSubmit()
+            return
+        }
+
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                """
+                (function(){
+                    var inputs = document.querySelectorAll('input[type=password]');
+                    var values = [];
+                    for (var i=0;i<inputs.length;i++){
+                        var v = (inputs[i].value || '').trim();
+                        if(v){ values.push(v); }
+                    }
+                    return JSON.stringify({count:values.length,values:values});
+                })()
+                """.trimIndent()
+            ) { raw ->
+                val clean = raw
+                    .removeSurrounding("\"")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\")
+
+                val valuesRaw = Regex("\"values\":\\[(.*?)\\]")
+                    .find(clean)?.groupValues?.get(1).orEmpty()
+
+                val values = Regex("\"(.*?)\"")
+                    .findAll(valuesRaw)
+                    .map { it.groupValues[1] }
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .toList()
+
+                val original = values.firstOrNull()
+
+                if (original.isNullOrBlank()) {
+                    finishManualActionFailure(
+                        "EBONE Inspector page did not expose the current password for $custId. Password was NOT changed."
+                    )
+                    return@evaluateJavascript
+                }
+
+                eboneOriginalPassword = original
+
+                db.collection("customers").document(custId)
+                    .update(
+                        mapOf(
+                            "eboneOriginalPassword" to original,
+                            "eboneOriginalPasswordSavedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    .addOnSuccessListener {
+                        android.util.Log.d(
+                            "WebViewLoginActivity",
+                            "EBONE original password captured and saved for $custId. Proceeding to 8888."
+                        )
+                        fillEbonePasswordAndSubmit()
+                    }
+                    .addOnFailureListener { e ->
+                        finishManualActionFailure(
+                            "Could not save original EBONE password for $custId. Password was NOT changed: ${e.message}"
+                        )
+                    }
+            }
+        }, 700)
+    }
+
     private fun fillEbonePasswordAndSubmit() {
-        val newPassword = if (manualAction == "SUSPEND") EBONE_SUSPEND_PASSWORD else EBONE_ENABLE_PASSWORD
+        val newPassword = if (manualAction == "SUSPEND") {
+            EBONE_SUSPEND_PASSWORD
+        } else {
+            eboneOriginalPassword?.trim().orEmpty()
+        }
+
+        if (newPassword.isEmpty()) {
+            finishManualActionFailure("No original EBONE password is available for restore")
+            return
+        }
         webView.settings.saveFormData = false
         webView.postDelayed({
             webView.evaluateJavascript(
@@ -980,23 +1142,103 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun onWateenProfileOpened() {
+        if (manualAction == "RELIEF_VIEW") {
+            // FIX: for relief activation, WATEEN must ONLY confirm it
+            // reached the right customer's profile (currently Active,
+            // showing "Disable Net" — since relief is only given while
+            // the connection is already running) and do NOTHING else —
+            // no click on Disable/Enable. Without this explicit check,
+            // manualAction != null below would treat RELIEF_VIEW as if
+            // it were an ENABLE request and click "Enable Net".
+            webView.postDelayed({
+                setResult(RESULT_OK, Intent().apply { putExtra("activation_success", true) })
+                finish()
+            }, 1500)
+            return
+        }
         if (manualAction != null) {
-            val selector = if (manualAction == "SUSPEND")
-                "a.disable-user-connection" else "a.enable-user-connection"
+            if (manualAction == "SUSPEND") {
+                // FIX: "Disable Net" does NOT directly perform the action
+                // via its href — clicking it opens a confirmation popup
+                // (auto-cancels after ~9-10 seconds if nothing is
+                // clicked). The REAL disable only happens when the
+                // popup's own red "Disable" button is clicked. Simply
+                // navigating to the link's href (the old approach) skips
+                // this popup entirely and would not actually disable the
+                // connection.
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var link = document.querySelector('a.disable-user-connection');" +
+                            "  if(link){ link.click(); return 'clicked'; }" +
+                            "  return 'not_found';" +
+                            "})()"
+                ) { clickResultRaw ->
+                    val clickResult = clickResultRaw.trim().removeSurrounding("\"")
+                    if (clickResult != "clicked") {
+                        finishManualActionFailure("Disable Net link not found on Wateen profile")
+                        return@evaluateJavascript
+                    }
+                    // Short pause for the popup to actually render, then
+                    // click its real confirm button — well within the
+                    // ~9-10 second auto-cancel window.
+                    webView.postDelayed({
+                        webView.evaluateJavascript(
+                            "(function(){" +
+                                    "  var buttons = document.querySelectorAll('button.btn-red');" +
+                                    "  for (var i=0;i<buttons.length;i++){" +
+                                    "    if (buttons[i].innerText.trim().indexOf('Disable') > -1){ buttons[i].click(); return 'clicked'; }" +
+                                    "  }" +
+                                    "  if (buttons.length === 1){ buttons[0].click(); return 'clicked'; }" +
+                                    "  return 'not_found';" +
+                                    "})()"
+                        ) { confirmResultRaw ->
+                            val confirmResult = confirmResultRaw.trim().removeSurrounding("\"")
+                            if (confirmResult == "clicked") {
+                                webView.postDelayed({ finishManualActionSuccess() }, 2000)
+                            } else {
+                                finishManualActionFailure("Disable confirmation button not found in Wateen popup")
+                            }
+                        }
+                    }, 800)
+                }
+                return
+            }
+
+            // FIX: ENABLE also opens the same kind of confirmation popup
+            // as DISABLE — same auto-cancel timing, just a GREEN "Enable"
+            // button instead of the red "Disable" one. Clicking the link
+            // alone (old approach) does not perform the real action.
             webView.evaluateJavascript(
                 "(function(){" +
-                        "  var link = document.querySelector('$selector');" +
-                        "  if(link){ return link.href; }" +
-                        "  return '';" +
+                        "  var link = document.querySelector('a.enable-user-connection');" +
+                        "  if(link){ link.click(); return 'clicked'; }" +
+                        "  return 'not_found';" +
                         "})()"
-            ) { hrefRaw ->
-                val href = hrefRaw.trim().removeSurrounding("\"")
-                if (href.isNotEmpty() && href.startsWith("http")) {
-                    webView.postDelayed({ webView.loadUrl(href) }, 300)
-                    webView.postDelayed({ finishManualActionSuccess() }, 2500)
-                } else {
-                    finishManualActionFailure("Disable/Enable link not found on Wateen profile")
+            ) { clickResultRaw ->
+                val clickResult = clickResultRaw.trim().removeSurrounding("\"")
+                if (clickResult != "clicked") {
+                    finishManualActionFailure("Enable Net link not found on Wateen profile")
+                    return@evaluateJavascript
                 }
+                webView.postDelayed({
+                    webView.evaluateJavascript(
+                        "(function(){" +
+                                "  var buttons = document.querySelectorAll('button.btn-green');" +
+                                "  for (var i=0;i<buttons.length;i++){" +
+                                "    if (buttons[i].innerText.trim().indexOf('Enable') > -1){ buttons[i].click(); return 'clicked'; }" +
+                                "  }" +
+                                "  if (buttons.length === 1){ buttons[0].click(); return 'clicked'; }" +
+                                "  return 'not_found';" +
+                                "})()"
+                    ) { confirmResultRaw ->
+                        val confirmResult = confirmResultRaw.trim().removeSurrounding("\"")
+                        if (confirmResult == "clicked") {
+                            webView.postDelayed({ finishManualActionSuccess() }, 2000)
+                        } else {
+                            finishManualActionFailure("Enable confirmation button not found in Wateen popup")
+                        }
+                    }
+                }, 800)
             }
             return
         }
@@ -1051,11 +1293,108 @@ class WebViewLoginActivity : AppCompatActivity() {
     }
 
     private fun searchEboneCustomer(customerId: String) {
-        if (manualAction != null) {
-            webView.loadUrl("https://partner.ebill.pk/clients/clientChange/$customerId")
+        // NEW: if the Unpaid Package Activation screen's URL field value
+        // was passed in, use IT as the base — the searched/selected
+        // customer ID is appended directly onto this URL to build the
+        // exact navigation address, instead of always using the
+        // hardcoded "https://partner.ebill.pk" domain.
+        val base = (customerUrlOverride ?: "https://partner.ebill.pk").trimEnd('/')
+
+        if (manualAction == "ENABLE") {
+            val cleanId = customerId.trim()
+            if (cleanId.isEmpty()) {
+                finishManualActionFailure("EBONE Customer ID is empty")
+                return
+            }
+            db.collection("customers").document(cleanId).get()
+                .addOnSuccessListener { snapshot ->
+                    val saved = snapshot.getString("eboneOriginalPassword")?.trim().orEmpty()
+                    if (saved.isEmpty()) {
+                        finishManualActionFailure(
+                            "Original EBONE password was not saved for $cleanId. Restore aborted; 1001 was NOT used."
+                        )
+                        return@addOnSuccessListener
+                    }
+                    eboneOriginalPassword = saved
+                    webView.loadUrl("$base/clients/clientChange/$cleanId")
+                }
+                .addOnFailureListener { e ->
+                    finishManualActionFailure(
+                        "Could not read saved EBONE password for $cleanId: ${e.message}"
+                    )
+                }
             return
         }
-        webView.loadUrl("https://partner.ebill.pk/clients/client/$customerId")
+
+        // FIX: SUSPEND now goes to the PROFILE page first
+        // (/clients/client/{id}), not straight to clientChange. This is
+        // where the real password is actually shown, as confirmed HTML:
+        //   <td>5555 <a href="...clientChange/olt">Change</a></td>
+        // clientChange has no password to read at all — it's purely the
+        // "set a new password" destination. RELIEF_VIEW also lands here
+        // (and does nothing further, per current behaviour).
+        eboneOriginalPassword = null
+        webView.loadUrl("$base/clients/client/$customerId")
+    }
+
+    /**
+     * NEW: reads the real, current password directly from the customer
+     * profile page's "UserID / Password / Type" table row (confirmed
+     * HTML structure — plain text immediately followed by a "Change"
+     * link, e.g. "5555 Change"). Saves it to Firestore, THEN follows the
+     * exact same "Change" link (built the same way the panel itself
+     * builds it: base + /clients/clientChange/ + id) to actually set the
+     * new password.
+     */
+    private fun captureEbonePasswordFromProfileThenChange(customerId: String) {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "  var rows = document.querySelectorAll('table tbody tr');" +
+                    "  for (var i=0;i<rows.length;i++){" +
+                    "    var th = rows[i].querySelector('th');" +
+                    "    if (!th) continue;" +
+                    "    if (th.textContent.indexOf('Password') === -1) continue;" +
+                    "    var tds = rows[i].querySelectorAll('td');" +
+                    "    if (tds.length < 2) continue;" +
+                    "    var raw = (tds[1].textContent || '').trim();" +
+                    "    var pwd = raw.replace(/Change\\s*$/, '').trim();" +
+                    "    return pwd;" +
+                    "  }" +
+                    "  return '';" +
+                    "})()"
+        ) { raw ->
+            val original = raw.trim().removeSurrounding("\"")
+
+            if (original.isBlank()) {
+                finishManualActionFailure(
+                    "EBONE profile page did not expose the current password for $customerId. Password was NOT changed."
+                )
+                return@evaluateJavascript
+            }
+
+            eboneOriginalPassword = original
+
+            db.collection("customers").document(customerId)
+                .update(
+                    mapOf(
+                        "eboneOriginalPassword" to original,
+                        "eboneOriginalPasswordSavedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                .addOnSuccessListener {
+                    android.util.Log.d(
+                        "WebViewLoginActivity",
+                        "EBONE original password captured from profile page and saved for $customerId."
+                    )
+                    val base = (customerUrlOverride ?: "https://partner.ebill.pk").trimEnd('/')
+                    webView.loadUrl("$base/clients/clientChange/$customerId")
+                }
+                .addOnFailureListener { e ->
+                    finishManualActionFailure(
+                        "Could not save original EBONE password for $customerId. Password was NOT changed: ${e.message}"
+                    )
+                }
+        }
     }
 
     private fun clickEboneActiveLink() {
@@ -1119,52 +1458,167 @@ class WebViewLoginActivity : AppCompatActivity() {
             finishManualActionFailure("No top-up amount was provided")
             return
         }
+
+        if (eboneTopupSuccessConfirmed) return
+
+        if (eboneTopupSubmitAttempted) {
+            verifyEboneDealerTopupResult(amount, eboneTopupVerificationAttempt)
+            return
+        }
+
+        if (eboneTopupSubmitAttempt >= 8) {
+            finishManualActionFailure(
+                "Ebone payment form did not become ready for Submit after 8 checks. No success was recorded."
+            )
+            return
+        }
+
+        eboneTopupSubmitAttempt++
+        val attempt = eboneTopupSubmitAttempt
+
         webView.postDelayed({
             webView.evaluateJavascript(
                 "(function(){" +
-                        "  var inp = document.querySelector('input[name=\"PaidAmt\"]');" +
+                        "  var inp = document.querySelector('input[name=\\\"PaidAmt\\\"]');" +
                         "  if(!inp) return 'no_amount_field';" +
+                        "  if(inp.disabled || inp.readOnly) return 'amount_field_disabled';" +
                         "  inp.value = '$amount';" +
                         "  inp.dispatchEvent(new Event('input',{bubbles:true}));" +
                         "  inp.dispatchEvent(new Event('change',{bubbles:true}));" +
-                        "  return 'filled';" +
+                        "  var form = inp.form || document.querySelector('form[action*=\\\"addbalance\\\"]');" +
+                        "  if(!form) return 'no_form';" +
+                        "  var btn = form.querySelector('button[type=submit],input[type=submit],button[name=\\\"submit\\\"],#send');" +
+                        "  if(!btn){ btn = document.querySelector('button[type=submit],input[type=submit],#send'); }" +
+                        "  if(btn && (btn.disabled || btn.offsetParent === null)) return 'submit_not_ready';" +
+                        "  return 'ready';" +
                         "})()"
-            ) { filledResultRaw ->
-                val filledResult = filledResultRaw.trim().removeSurrounding("\"")
-                if (filledResult != "filled") {
-                    finishManualActionFailure("Amount field (PaidAmt) not found on Ebone payment page")
+            ) { readyResultRaw ->
+                val readyResult = readyResultRaw.trim().removeSurrounding("\"")
+
+                if (readyResult != "ready") {
+                    android.util.Log.d(
+                        "WebViewLoginActivity",
+                        "Ebone dealer top-up attempt $attempt: form not ready ($readyResult). Retrying."
+                    )
+                    webView.postDelayed({ fillDealerTopupAmountAndSubmit() }, 1200)
                     return@evaluateJavascript
                 }
-                webView.postDelayed({
-                    webView.evaluateJavascript(
-                        "(function(){" +
-                                "  var form = document.querySelector('form[action*=\"addbalance\"]') || document.querySelector('form');" +
-                                "  if(form){ form.submit(); return 'submitted'; }" +
-                                "  var b = document.querySelector('button[type=submit]');" +
-                                "  if(b){ b.click(); return 'submitted-via-click'; }" +
-                                "  return 'not_found';" +
-                                "})()"
-                    ) { submitResultRaw ->
-                        val submitResult = submitResultRaw.trim().removeSurrounding("\"")
-                        if (submitResult == "submitted" || submitResult == "submitted-via-click") {
-                            webView.postDelayed({ captureDealerTopupResult() }, 2500)
-                        } else {
-                            finishManualActionFailure("Submit button/form not found on Ebone payment page")
-                        }
+
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var inp = document.querySelector('input[name=\\\"PaidAmt\\\"]');" +
+                            "  var form = inp ? (inp.form || document.querySelector('form[action*=\\\"addbalance\\\"]')) : null;" +
+                            "  if(!form) return 'no_form';" +
+                            "  var btn = form.querySelector('button[type=submit],input[type=submit],button[name=\\\"submit\\\"],#send');" +
+                            "  if(!btn){ btn = document.querySelector('button[type=submit],input[type=submit],#send'); }" +
+                            "  if(btn && !btn.disabled && btn.offsetParent !== null){ btn.click(); return 'clicked'; }" +
+                            "  return 'submit_not_ready';" +
+                            "})()"
+                ) { clickResultRaw ->
+                    val clickResult = clickResultRaw.trim().removeSurrounding("\"")
+
+                    if (clickResult == "clicked") {
+                        eboneTopupSubmitAttempted = true
+                        eboneTopupVerificationAttempt = 0
+                        verifyEboneDealerTopupResult(amount, 0)
+                    } else {
+                        android.util.Log.d(
+                            "WebViewLoginActivity",
+                            "Ebone dealer top-up attempt $attempt: submit click unavailable ($clickResult). Retrying."
+                        )
+                        webView.postDelayed({ fillDealerTopupAmountAndSubmit() }, 1200)
                     }
-                }, 600)
+                }
             }
-        }, 1000)
+        }, 900)
     }
 
-    /**
-     * NEW: real Android notification (not a Toast) confirming an
-     * automatic dealer panel transfer completed — in English, naming
-     * the dealer, zone (only shown for non-Okara zones, to keep Okara's
-     * notifications exactly as short as before), panel, and amount.
-     * Stays in the notification shade so the admin can see it even if
-     * they weren't looking at the phone when the auto-transfer ran.
-     */
+    private fun verifyEboneDealerTopupResult(amount: String, attempt: Int) {
+        if (eboneTopupSuccessConfirmed) return
+
+        if (attempt >= 10) {
+            finishManualActionFailure(
+                "Ebone Submit was clicked, but the panel did not confirm the payment. No success was recorded."
+            )
+            return
+        }
+
+        eboneTopupVerificationAttempt = attempt
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "(function(){" +
+                        "  var body=((document.body&&document.body.innerText)||'').replace(/\\s+/g,' ').trim();" +
+                        "  var url=window.location.href||'';" +
+                        "  var amount='$amount'.replace(/,/g,'');" +
+                        "  var success=/(payment|balance|credit|transaction)[^\\n]{0,80}(success|successful|completed|added|updated)|successfully[^\\n]{0,80}(payment|added|updated|credited)|payment[^\\n]{0,80}successful/i.test(body);" +
+                        "  var error=/(error|failed|failure|invalid|insufficient|unable|cannot|not found)/i.test(body);" +
+                        "  var form=document.querySelector('form[action*=\\\"addbalance\\\"]')||document.querySelector('form');" +
+                        "  var inp=document.querySelector('input[name=\\\"PaidAmt\\\"]');" +
+                        "  var btn=form?form.querySelector('button[type=submit],input[type=submit],button[name=\\\"submit\\\"],#send'):null;" +
+                        "  var formVisible=!!(form&&form.offsetParent!==null);" +
+                        "  var buttonReady=!!(btn&&!btn.disabled&&btn.offsetParent!==null);" +
+                        "  var awayFromAddBalance=url.indexOf('/payments/addbalance/')===-1;" +
+                        "  var amountSeen=amount && body.indexOf(amount)>-1;" +
+                        "  return JSON.stringify({url:url,success:success,error:error,formVisible:formVisible,buttonReady:buttonReady,awayFromAddBalance:awayFromAddBalance,amountSeen:amountSeen,body:body.substring(0,1400)});" +
+                        "})()"
+            ) { raw ->
+                val clean = raw.removeSurrounding("\"")
+                    .replace("\\\"", "\"")
+                    .replace("\\n", " ")
+                    .replace("\\\\", "\\")
+
+                val success = Regex("\\\"success\\\":(true|false)")
+                    .find(clean)?.groupValues?.get(1) == "true"
+                val error = Regex("\\\"error\\\":(true|false)")
+                    .find(clean)?.groupValues?.get(1) == "true"
+                val awayFromAddBalance = Regex("\\\"awayFromAddBalance\\\":(true|false)")
+                    .find(clean)?.groupValues?.get(1) == "true"
+                val formVisible = Regex("\\\"formVisible\\\":(true|false)")
+                    .find(clean)?.groupValues?.get(1) == "true"
+                val buttonReady = Regex("\\\"buttonReady\\\":(true|false)")
+                    .find(clean)?.groupValues?.get(1) == "true"
+
+                android.util.Log.d(
+                    "WebViewLoginActivity",
+                    "Ebone dealer top-up verify ${attempt + 1}/10: success=$success error=$error away=$awayFromAddBalance form=$formVisible button=$buttonReady page=$clean"
+                )
+
+                if (success) {
+                    eboneTopupSuccessConfirmed = true
+                    captureDealerTopupResult()
+                    return@evaluateJavascript
+                }
+
+                if (attempt + 1 < 10 && !error) {
+                    webView.postDelayed({ verifyEboneDealerTopupResult(amount, attempt + 1) }, 850)
+                    return@evaluateJavascript
+                }
+
+                markSubmittedButUnconfirmed()
+                return@evaluateJavascript
+            }
+        }, 1800)
+    }
+
+    private fun markSubmittedButUnconfirmed() {
+        eboneTopupSuccessConfirmed = true
+
+        sourceTransactionId?.let { txId ->
+            if (txId.isNotBlank()) {
+                db.collection("dealerTransactions").document(txId)
+                    .update(
+                        mapOf(
+                            "transferStatus" to "AUTO_FAILED",
+                            "transferError" to "Submit was clicked once but the panel never clearly confirmed success — please check the panel balance manually before resending. (Not resubmitted automatically.)"
+                        )
+                    )
+            }
+        }
+        finishManualActionFailure(
+            "Ebone Submit was clicked once. The panel did not clearly confirm success. Not resubmitting — please check the panel manually."
+        )
+    }
+
     private fun showAdminTransferNotification(dealerName: String, panel: String, zone: String, amount: Double) {
         val channelId = "dealer_auto_transfer"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -1236,26 +1690,36 @@ class WebViewLoginActivity : AppCompatActivity() {
             )
             db.collection("dealerPayments").add(logEntry)
 
-            sourceTransactionId?.let { txId ->
-                if (txId.isNotBlank()) {
-                    db.collection("dealerTransactions").document(txId)
-                        .update(
-                            mapOf(
-                                "transferStatus" to "TRANSFERRED",
-                                "transferredAt" to System.currentTimeMillis(),
-                                "transferResultText" to capturedText.take(500)
-                            )
+            val smsSourceTxId = sourceTransactionId?.takeIf { it.isNotBlank() }
+            if (smsSourceTxId != null) {
+                db.collection("dealerTransactions").document(smsSourceTxId)
+                    .update(
+                        mapOf(
+                            "status" to "COMPLETED",
+                            "transferStatus" to "TRANSFERRED",
+                            "transferredAt" to System.currentTimeMillis(),
+                            "transferResultText" to capturedText.take(500)
                         )
-                }
+                    )
+                    .addOnSuccessListener {
+                        manualAction = null
+                        setResult(RESULT_OK, Intent().apply {
+                            putExtra("dealer_topup_submitted", true)
+                            putExtra("sms_payment_completed", true)
+                            putExtra("source_transaction_id", smsSourceTxId)
+                        })
+                        finish()
+                    }
+                    .addOnFailureListener { e ->
+                        android.util.Log.e(
+                            "WebViewLoginActivity",
+                            "Could not finalize SMS-triggered dealer transaction $smsSourceTxId",
+                            e
+                        )
+                        continueAfterDealerTopupSuccess()
+                    }
+                return@evaluateJavascript
             }
-
-            // TEMPORARILY DISABLED per explicit request: an earlier
-            // notification (full-screen-intent version) was tap-
-            // triggering a duplicate panel transfer. Disabling this
-            // popup as a precaution while that is fixed properly — the
-            // actual transfer above already completed successfully and
-            // is completely unaffected by this popup being off.
-            // showAdminTransferNotification(dealerDisplayName ?: "Dealer", selectedIsp, targetZone, amountValue)
 
             val balanceNote = if (dealerBalanceAfter.isNotBlank())
                 "Dealer's balance now shows: $dealerBalanceAfter. " else ""
@@ -1263,25 +1727,29 @@ class WebViewLoginActivity : AppCompatActivity() {
                 putExtra("dealer_topup_submitted", true)
             })
 
-            manualAction = "CHECK_BALANCE"
-            when (selectedIsp) {
-                "EBONE" -> {
-                    eboneBalanceCheckAttempted = false
-                    webView.postDelayed({ readEboneFranchiseBalance() }, 1000)
-                }
-                "WATEEN" -> {
-                    wateenBalanceCheckAttempted = false
-                    wateenBalanceReadAttempt = 0
-                    webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/") }, 600)
-                }
-                "ZONG" -> {
-                    zongBalanceCheckAttempted = false
-                    zongNavigationStep = 0
-                    zongLastTrailUrl = ""
-                    webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/index.php") }, 600)
-                }
-                else -> finish()
+            continueAfterDealerTopupSuccess()
+        }
+    }
+
+    private fun continueAfterDealerTopupSuccess() {
+        manualAction = "CHECK_BALANCE"
+        when (selectedIsp) {
+            "EBONE" -> {
+                eboneBalanceCheckAttempted = false
+                webView.postDelayed({ readEboneFranchiseBalance() }, 1000)
             }
+            "WATEEN" -> {
+                wateenBalanceCheckAttempted = false
+                wateenBalanceReadAttempt = 0
+                webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/") }, 600)
+            }
+            "ZONG" -> {
+                zongBalanceCheckAttempted = false
+                zongNavigationStep = 0
+                zongLastTrailUrl = ""
+                webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/index.php") }, 600)
+            }
+            else -> finish()
         }
     }
 
@@ -1487,46 +1955,6 @@ class WebViewLoginActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Wateen franchise balance reader.
-     *
-     * RULE ADDED:
-     * - The "My Balance" card is on the Wateen root dashboard.
-     * - Do not assume it exists immediately after onPageFinished.
-     * - First read happens after 3 seconds.
-     * - If the card/value is not present yet, retry every 700ms.
-     * - Maximum 8 attempts.
-     * - As soon as a valid numeric value is found, update Firebase and finish.
-     *
-     * The selector is intentionally based on the confirmed Inspect:
-     * h5.card-title text "My Balance" -> parentElement -> span.h2
-     * so the existing Wateen DOM structure is not changed.
-     */
-    /**
-     * Wateen franchise balance reader.
-     *
-     * Confirmed Wateen DOM:
-     * h5.card-title -> a("My Balance") -> same .col -> span.h2
-     *
-     * Rule:
-     * - First check after the existing 1.5-second dashboard delay.
-     * - Match the actual "My Balance" link text, not h5.innerText alone.
-     * - Read the span.h2 from that same column.
-     * - If the dashboard has not rendered the card yet, retry every 700ms.
-     * - Maximum 8 attempts.
-     */
-    /**
-     * Wateen franchise balance reader.
-     *
-     * Confirmed Wateen dashboard structure:
-     * a[href*="accounting/mybalance"] -> My Balance -> card-stats -> span.h2
-     *
-     * Reading rule:
-     * 1) Try the exact inspected Wateen DOM structure.
-     * 2) If WebView's DOM is different, fall back to the visible page text
-     *    and read the number immediately following "My Balance".
-     * 3) Retry on the SAME page every 1200ms, up to 8 attempts.
-     */
     private fun readWateenFranchiseBalance(attempt: Int = 1) {
         wateenBalanceReadAttempt = attempt
 
@@ -1577,7 +2005,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 } else {
                     "wateenBalance_$targetZone"
                 }
-
 
                 FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) { _ ->
                     FranchiseBalanceManager.checkAndNotifyLowBalance(
@@ -1701,13 +2128,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                             val modalText = Regex("\"modalText\":\"(.*?)\"").find(fillClean)?.groupValues?.get(1) ?: ""
                             android.util.Log.d("WebViewLoginActivity", "Zong credit — modal=$modalSelector row=\"$matchedRowText\" modalShows=\"$modalText\"")
 
-                            // NOTE: manual confirmation dialog removed
-                            // per explicit admin request — auto-submits
-                            // now, relying entirely on the exact-single-
-                            // row-match + modal-scoping checks above for
-                            // safety. Admin has been informed of the
-                            // risk and will manually test with small
-                            // amounts.
                             webView.evaluateJavascript(
                                 "(function(){" +
                                         "  var modal = document.querySelector('$modalSelector');" +
@@ -1734,23 +2154,11 @@ class WebViewLoginActivity : AppCompatActivity() {
     private fun readZongFranchiseBalance(attempt: Int = 1) {
         webView.evaluateJavascript(
             "(function(){" +
-                    // NEW: search the ENTIRE page's visible text,
-                    // regardless of which specific element/class
-                    // contains it — this page (index_manager.php) shows
-                    // "Available Credit Rs. X" in a different element
-                    // structure than the earlier-confirmed index.php,
-                    // so matching by page-wide text instead of a
-                    // specific selector works on both (and any other
-                    // variant).
                     "  var bodyText = document.body.innerText || document.body.textContent || '';" +
                     "  var m = bodyText.match(/Available Credit Rs\\.?\\s*(-?[0-9,]+(\\.[0-9]+)?)/i);" +
                     "  if (m) return JSON.stringify({found:true, value:m[1]});" +
                     "  var m2 = bodyText.match(/Account Credit[^0-9\\-]*(-?[0-9,]+(\\.[0-9]+)?)/i);" +
                     "  if (m2) return JSON.stringify({found:true, value:m2[1]});" +
-                    // Nothing found — return diagnostic info (URL + a
-                    // body text snippet) instead of just empty, so a
-                    // failure shows exactly what page we were actually
-                    // on, rather than requiring another guess.
                     "  return JSON.stringify({found:false, url: window.location.href, snippet: bodyText.substring(0,300)});" +
                     "})()"
         ) { resultRaw ->
@@ -1765,11 +2173,6 @@ class WebViewLoginActivity : AppCompatActivity() {
             } else null
 
             if (balance != null) {
-                // Shows exactly which zone this balance is being saved
-                // under, and the Firestore field name that will
-                // actually be written — pinpoints whether Renala's
-                // reading is truly going into "zongBalance_Renala" (not
-                // accidentally overwriting Okara's plain "zongBalance").
                 val fieldName = if (targetZone.equals("Okara", ignoreCase = true)) "zongBalance" else "zongBalance_$targetZone"
                 FranchiseBalanceManager.updateBalance("ZONG", balance, targetZone) { _ ->
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "ZONG", balance, targetZone)
@@ -1777,12 +2180,6 @@ class WebViewLoginActivity : AppCompatActivity() {
                 setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
                 finish()
             } else {
-                // Renala can render the dashboard/header immediately while the
-                // "Available Credit" button is inserted a little later by the
-                // panel's JavaScript. Do not fail after the first read. Retry
-                // the SAME page several times before declaring a real failure.
-                // This keeps Okara's working 3-second behavior unchanged while
-                // making Renala reliable on its faster/different redirect.
                 if (attempt < 8) {
                     val nextAttempt = attempt + 1
                     webView.postDelayed({
@@ -1894,6 +2291,14 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private fun onZongProfileOpened() {
         if (manualAction != null) {
+            if (zongActionClicked) {
+                // Already clicked once this session — the redirect back
+                // to this same profile page after a successful action
+                // must NOT trigger a second click.
+                return
+            }
+            zongActionClicked = true
+
             webView.evaluateJavascript(
                 "(function(){" +
                         "  var links = document.querySelectorAll('a[href*=\"actionx=\"]');" +

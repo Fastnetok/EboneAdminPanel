@@ -30,6 +30,13 @@ class DealerPanelActivity : AppCompatActivity() {
     private var dealerCount = 0
     private var totalBalance = 0.0
 
+    // NEW: dealerId -> dealer name lookup, kept in sync from the same
+    // "dealers" snapshot listener that already builds the Dealers tab.
+    // observePending() uses this so every pending/verified payment row
+    // can show WHICH dealer it belongs to — previously the dealerId was
+    // read off each transaction but never actually looked up or shown.
+    private val dealerNameCache = HashMap<String, String>()
+
     // NEW: remembers which EditText (inside whichever dialog is open) to
     // fill once WebViewLoginActivity's FETCH_DEALER_ID flow returns a
     // numeric Wateen dealer ID.
@@ -356,6 +363,7 @@ class DealerPanelActivity : AppCompatActivity() {
                     val ebone = document.getDouble("eboneBalance") ?: 0.0
                     val zong = document.getDouble("zongBalance") ?: 0.0
                     totalBalance += wateen + ebone + zong
+                    dealerNameCache[document.id] = document.getString("name") ?: document.id
                     dealerList.addView(dealerCard(document.id, document))
                 }
 
@@ -461,7 +469,7 @@ class DealerPanelActivity : AppCompatActivity() {
         // held for manual confirmation, not auto-credited) alongside
         // PENDING (waiting for SMS match) ones.
         pendingListener = db.collection("dealerTransactions")
-            .whereIn("status", listOf("PENDING", "VERIFIED", "NEEDS_REVIEW"))
+            .whereIn("status", listOf("PENDING", "VERIFIED", "NEEDS_REVIEW", "REJECTED_DUPLICATE"))
             .addSnapshotListener { query, error ->
                 if (error != null || query == null) return@addSnapshotListener
 
@@ -473,7 +481,7 @@ class DealerPanelActivity : AppCompatActivity() {
                 val relevantDocs = query.documents.filter { doc ->
                     val status = doc.getString("status")
                     val transferStatus = doc.getString("transferStatus") ?: ""
-                    status == "PENDING" || status == "NEEDS_REVIEW" ||
+                    status == "PENDING" || status == "NEEDS_REVIEW" || status == "REJECTED_DUPLICATE" ||
                             (status == "VERIFIED" && transferStatus != "TRANSFERRED")
                 }
 
@@ -491,11 +499,12 @@ class DealerPanelActivity : AppCompatActivity() {
                     val amount = document.getDouble("amount") ?: 0.0
                     val tid = document.getString("bankTransactionId") ?: ""
                     val dealerId = document.getString("dealerId") ?: ""
+                    val dealerName = dealerNameCache[dealerId] ?: "Dealer"
 
                     when (status) {
                         "PENDING" -> pendingList.addView(
                             swipeToDeleteWrapper(
-                                waitingRow(document.id, panel, amount, tid)
+                                waitingRow(document.id, dealerName, panel, amount, tid)
                             ) {
                                 deletePendingPayment(document.id)
                             }
@@ -505,10 +514,25 @@ class DealerPanelActivity : AppCompatActivity() {
                             swipeToDeleteWrapper(
                                 needsReviewRow(
                                     document.id,
+                                    dealerName,
                                     panel,
                                     amount,
                                     tid,
                                     document
+                                )
+                            ) {
+                                deletePendingPayment(document.id)
+                            }
+                        )
+
+                        "REJECTED_DUPLICATE" -> pendingList.addView(
+                            swipeToDeleteWrapper(
+                                duplicateRejectedRow(
+                                    dealerName = dealerName,
+                                    panel = panel,
+                                    amount = amount,
+                                    tid = tid,
+                                    message = document.getString("duplicateMessage").orEmpty()
                                 )
                             ) {
                                 deletePendingPayment(document.id)
@@ -523,9 +547,17 @@ class DealerPanelActivity : AppCompatActivity() {
                              * DEALER_TOPUP automation.
                              */
                             when (transferStatus) {
-                                "AUTO_SENDING" -> pendingList.addView(
+                                // NEW: AUTO_CLAIMED is the brief (usually
+                                // sub-second) state between "verified" and
+                                // WebViewLoginActivity actually opening —
+                                // introduced by the fix that stops the same
+                                // payment from being sent to the panel twice.
+                                // Shown identically to AUTO_SENDING so the
+                                // row never silently disappears mid-flow.
+                                "AUTO_SENDING", "AUTO_CLAIMED" -> pendingList.addView(
                                     swipeToDeleteWrapper(
                                         autoSendingRow(
+                                            dealerName,
                                             panel,
                                             amount,
                                             tid
@@ -538,6 +570,7 @@ class DealerPanelActivity : AppCompatActivity() {
                                 "AUTO_FAILED" -> pendingList.addView(
                                     swipeToDeleteWrapper(
                                         autoFailedRow(
+                                            dealerName = dealerName,
                                             panel = panel,
                                             amount = amount,
                                             tid = tid,
@@ -692,6 +725,7 @@ class DealerPanelActivity : AppCompatActivity() {
      */
     private fun needsReviewRow(
         transactionId: String,
+        dealerName: String,
         panel: String,
         amount: Double,
         tid: String,
@@ -710,7 +744,7 @@ class DealerPanelActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(8) }
         }
         row.addView(TextView(this).apply {
-            text = "$panel  —  Rs. ${"%.0f".format(amount)}"
+            text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(purple)
@@ -750,7 +784,7 @@ class DealerPanelActivity : AppCompatActivity() {
             .setMessage("This will credit the dealer's balance based on the matched SMS shown. Only confirm if you've checked it's genuine.")
             .setPositiveButton("Confirm & Credit") { _, _ ->
                 val data = document.data ?: return@setPositiveButton
-                DealerPaymentVerifier.verifyAndCredit(this, transactionId, data) { success ->
+                DealerPaymentVerifier.verifyAndCredit(this, transactionId, data, "manual_confirm_needs_review") { success ->
                     runOnUiThread {
                         Toast.makeText(
                             this,
@@ -764,7 +798,7 @@ class DealerPanelActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun waitingRow(transactionId: String, panel: String, amount: Double, tid: String): LinearLayout {
+    private fun waitingRow(transactionId: String, dealerName: String, panel: String, amount: Double, tid: String): LinearLayout {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -780,7 +814,7 @@ class DealerPanelActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "$panel  —  Rs. ${"%.0f".format(amount)}"
+                text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
                 textSize = 13f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 setTextColor(amberText)
@@ -818,7 +852,7 @@ class DealerPanelActivity : AppCompatActivity() {
     private fun retryMatchForOnePayment(transactionId: String) {
         Toast.makeText(this, "Checking for this payment's SMS…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
-            DealerPaymentSmsScanner.scanAllPending(this@DealerPanelActivity)
+            DealerPaymentSmsScanner.scanAllPending(this@DealerPanelActivity, "manual_retry_button")
             db.collection("dealerTransactions").document(transactionId).get()
                 .addOnSuccessListener { doc ->
                     val stillPending = doc.getString("status") == "PENDING"
@@ -834,6 +868,7 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun autoSendingRow(
+        dealerName: String,
         panel: String,
         amount: Double,
         tid: String
@@ -863,7 +898,7 @@ class DealerPanelActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
 
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "$panel  —  Rs. ${"%.0f".format(amount)}"
+                text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
                 textSize = 13f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 setTextColor(Color.parseColor("#18794E"))
@@ -880,6 +915,7 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun autoFailedRow(
+        dealerName: String,
         panel: String,
         amount: Double,
         tid: String,
@@ -899,7 +935,7 @@ class DealerPanelActivity : AppCompatActivity() {
         }
 
         row.addView(TextView(this).apply {
-            text = "⚠ $panel  —  Rs. ${"%.0f".format(amount)}"
+            text = "⚠ $dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(Color.parseColor("#B42318"))
@@ -910,6 +946,48 @@ class DealerPanelActivity : AppCompatActivity() {
                 "TID: $tid  •  Automatic transfer failed"
             } else {
                 "TID: $tid  •  $error"
+            }
+            textSize = 11f
+            setTextColor(textMuted)
+            setPadding(0, dp(3), 0, 0)
+        })
+
+        return row
+    }
+
+    /** NEW: shown when the cross-app duplicate gate (PaymentClaimManager)
+     * rejected this dealer payment because the exact same TID/reference
+     * was already used elsewhere — either by a customer activating their
+     * package with it, or by this same dealer already. Shows exactly who
+     * used it first so the admin can confront the dealer/customer with
+     * proof instead of guessing. No balance was credited and no panel
+     * automation ran for this record. */
+    private fun duplicateRejectedRow(dealerName: String, panel: String, amount: Double, tid: String, message: String): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = outlinedPill(
+                Color.parseColor("#FFF7E6"),
+                Color.parseColor("#B54708"),
+                12
+            )
+            layoutParams = LinearLayout.LayoutParams(-1, -2).also {
+                it.bottomMargin = dp(8)
+            }
+        }
+
+        row.addView(TextView(this).apply {
+            text = "⛔ $dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.parseColor("#B54708"))
+        })
+
+        row.addView(TextView(this).apply {
+            text = if (message.isBlank()) {
+                "TID: $tid  •  Rejected — this TID was already used elsewhere"
+            } else {
+                "TID: $tid  •  $message"
             }
             textSize = 11f
             setTextColor(textMuted)
@@ -1246,7 +1324,7 @@ class DealerPanelActivity : AppCompatActivity() {
     private fun scanNow() {
         Toast.makeText(this, "Scanning SMS inbox for dealer payments…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
-            val matched = DealerPaymentSmsScanner.scanAllPending(this@DealerPanelActivity)
+            val matched = DealerPaymentSmsScanner.scanAllPending(this@DealerPanelActivity, "manual_scan_now_button")
             runOnUiThread {
                 Toast.makeText(
                     this@DealerPanelActivity,

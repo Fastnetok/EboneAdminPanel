@@ -47,7 +47,6 @@ class PendingSummaryActivity :
             adapter
 
         loadPendingComplaints()
-
     }
 
     private fun loadPendingComplaints() {
@@ -77,63 +76,73 @@ class PendingSummaryActivity :
                                     Complaint::class.java
                                 ) ?: continue
 
+                            /*
+                             * Pending Summary:
+                             *
+                             * Employee کی تمام active
+                             * assigned complaints count کریں۔
+                             *
+                             * Resolved complaints شامل نہیں ہوں گی۔
+                             */
                             if (
                                 complaint.assignedTo.isNotEmpty()
                                 &&
-                                complaint.status != "Resolved"
+                                !complaint.status.equals(
+                                    "Resolved",
+                                    true
+                                )
                             ) {
 
                                 val employee =
                                     complaint.assignedTo
 
                                 totalMap[employee] =
-                                    (totalMap[employee]
-                                        ?: 0) + 1
-
+                                    (totalMap[employee] ?: 0) + 1
                             }
-
                         }
 
+                        /*
+                         * Progress کی ایک complaint employee کے
+                         * Dashboard/Progress میں رہتی ہے۔
+                         *
+                         * باقی complaints Pending ہوتی ہیں۔
+                         */
                         for (
-                        employee in totalMap.keys
+                        entry in totalMap.entries
                         ) {
 
+                            val employee =
+                                entry.key
+
                             val total =
-                                totalMap[employee]
-                                    ?: 0
+                                entry.value
 
                             val pending =
-                                total - 1
+                                if (total > 1) {
+                                    total - 1
+                                } else {
+                                    0
+                                }
 
-                            if (
-                                pending > 0
-                            ) {
+                            if (pending > 0) {
 
                                 employeeList.add(
-
                                     employee +
                                             " (" +
                                             pending +
                                             ")"
-
                                 )
-
                             }
-
                         }
 
                         adapter.notifyDataSetChanged()
-
                     }
 
                     override fun onCancelled(
                         error: DatabaseError
                     ) {
                     }
-
                 }
-
             )
-
     }
 }

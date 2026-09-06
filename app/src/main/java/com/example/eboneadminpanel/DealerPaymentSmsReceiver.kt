@@ -135,7 +135,8 @@ class DealerPaymentSmsReceiver : BroadcastReceiver() {
             try {
                 val matched =
                     DealerPaymentSmsScanner.scanAllPending(
-                        appContext
+                        appContext,
+                        "sms_receiver_scan_all"
                     )
 
                 Log.d(

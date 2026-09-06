@@ -38,11 +38,18 @@ class CustomerListActivity : AppCompatActivity() {
     private var currentDocs = emptyList<DocumentSnapshot>()
     private var searchText = ""
 
-    // NEW: tracks which customer/grace-days a "Manual Recharge" WebView
+    // Tracks which customer/grace-days a "Manual Recharge" WebView
     // launch was for, so onActivityResult knows what to save once the
     // portal activation actually succeeds.
     private var pendingGraceCustomerId: String? = null
     private var pendingGraceDays: Int = 0
+
+    // NEW: tracks which ISP the pending manual-recharge grace request was
+    // for. Needed so that, on success, we can also write "reliefCompany"
+    // into Firestore along with the other relief fields below — without
+    // this, that field would be missing for customers activated through
+    // this manual-recharge flow specifically.
+    private var pendingGraceIsp: String? = null
 
     companion object {
         private const val REQUEST_MANUAL_RECHARGE = 5001
@@ -438,6 +445,10 @@ class CustomerListActivity : AppCompatActivity() {
     private fun launchManualRecharge(customerId: String, isp: String, graceDays: Int) {
         pendingGraceCustomerId = customerId
         pendingGraceDays = graceDays
+        // NEW: remember the ISP for this pending grace activation so that,
+        // on success, "reliefCompany" can be written along with the other
+        // relief fields below.
+        pendingGraceIsp = isp
         val intent = Intent(this, WebViewLoginActivity::class.java).apply {
             putExtra("selected_isp", isp)
             putExtra("auto_activate_customer_id", customerId)
@@ -469,16 +480,64 @@ class CustomerListActivity : AppCompatActivity() {
             val success = data?.getBooleanExtra("activation_success", false) ?: false
             val custId = pendingGraceCustomerId
             val days = pendingGraceDays
+            val isp = pendingGraceIsp
 
             if (success && custId != null) {
                 if (days in 1..7) {
                     // Grace period selected — store the deadline so
                     // GraceDeadlineWorker can flag this customer for
                     // auto-suspend if they don't pay in time.
+                    //
+                    // FIX: previously ONLY "graceDeadline" was written
+                    // here. GraceDeadlineWorker, EboneAdminApp's
+                    // foreground auto-disable checker, and
+                    // UnpaidPackageActivationActivity's Relief
+                    // Active/Disabled Users lists all filter on
+                    // reliefStatus == "ACTIVE" — a customer activated
+                    // through this manual-recharge screen never had that
+                    // field set, so it was invisible to every one of
+                    // those automatic checks and never got auto-disabled
+                    // if the customer failed to pay. Now the same relief
+                    // fields a normal Unpaid Package Activation writes
+                    // are written here too, so a "running user, activated
+                    // and put on relief manually because they promised to
+                    // pay in a few days" customer is now covered by the
+                    // exact same automatic suspend pipeline as every
+                    // other relief customer — for EBONE, WATEEN and ZONG
+                    // alike.
+                    // FIX: EboneAdminApp's foreground auto-disable checker
+                    // and GraceDeadlineWorker BOTH require
+                    // activationStatus=="ACTIVE" together with
+                    // reliefStatus=="ACTIVE" before they will ever pick up
+                    // a customer for auto-suspend. A customer manually
+                    // pre-activated on the ISP panel outside the normal
+                    // recharge flow (e.g. via a bypass, then later given a
+                    // cash-payment grace period here) may never have had
+                    // activationStatus written as the literal string
+                    // "ACTIVE" at all — writeActivationResultToFirestore()
+                    // in WebViewLoginActivity, the only other place that
+                    // sets it, never runs for this manual-recharge path.
+                    // Without this field, the deadline could pass by any
+                    // amount of time and the customer would never be
+                    // auto-suspended. This now guarantees both required
+                    // fields are set together.
                     val deadline = System.currentTimeMillis() + (days * 24L * 60L * 60L * 1000L)
                     db.collection("customers").document(custId)
-                        .update("graceDeadline", deadline)
-                    Toast.makeText(this, "Activated — grace period: $days day(s)", Toast.LENGTH_SHORT).show()
+                        .update(
+                            mapOf(
+                                "graceDeadline" to deadline,
+                                "reliefStatus" to "ACTIVE",
+                                "activationStatus" to "ACTIVE",
+                                "reliefCompany" to (isp ?: "EBONE"),
+                                "reliefDays" to days,
+                                "reliefStartAt" to System.currentTimeMillis()
+                            )
+                        )
+                    Toast.makeText(
+                        this,
+                        "Activated — grace period: $days day(s). Will auto-disable if unpaid.",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 } else {
                     Toast.makeText(this, "Activated (full month)", Toast.LENGTH_SHORT).show()
                 }
@@ -488,6 +547,7 @@ class CustomerListActivity : AppCompatActivity() {
 
             pendingGraceCustomerId = null
             pendingGraceDays = 0
+            pendingGraceIsp = null
         }
     }
 
@@ -594,7 +654,7 @@ class CustomerListActivity : AppCompatActivity() {
 
                 itemView.alpha = 1f
 
-                // NEW: tap the status badge to open the manual-recharge /
+                // Tap the status badge to open the manual-recharge /
                 // suspend / enable action menu — no new XML button needed.
                 tvStatus.isClickable = true
                 tvStatus.isFocusable = true

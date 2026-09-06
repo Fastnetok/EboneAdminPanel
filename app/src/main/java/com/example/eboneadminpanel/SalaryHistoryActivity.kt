@@ -363,6 +363,17 @@ class SalaryHistoryActivity : AppCompatActivity() {
                         val daysToCount = if (isCurrentMonth) now.get(Calendar.DAY_OF_MONTH) else totalDays
 
                         val recordMap = attSnap.children.associateBy { it.key ?: "" }
+
+                        // FIX: determine this employee's first present day
+                        // this month (same rule as the main Employee screen)
+                        // so a day before their first-ever check-in is never
+                        // counted absent (e.g. newly joined mid-month).
+                        val presentKeysThisMonth = recordMap.filter { readDayAttendance(it.value) != null }.keys
+                        val firstPresentDay = if (presentKeysThisMonth.isNotEmpty()) {
+                            try { presentKeysThisMonth.sorted().first().split("-").last().toInt() }
+                            catch (e: Exception) { daysToCount }
+                        } else daysToCount + 1
+
                         val presentDates = mutableSetOf<String>()
                         var deductMins = 0L; var otMins = 0L; var late = 0; var absent = 0
 
@@ -370,10 +381,18 @@ class SalaryHistoryActivity : AppCompatActivity() {
                             val dk = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
                             val rec = recordMap[dk]
                             val over = overSnap.child(dk)
-                            val ci = rec?.child("checkInTime")?.value?.toString() ?: ""
-                            val ciTs = (rec?.child("checkInTimestamp")?.value as? Long) ?: 0L
-                            val coTs = (rec?.child("checkOutTimestamp")?.value as? Long) ?: 0L
-                            val st = rec?.child("status")?.value?.toString() ?: ""
+                            // FIX (root cause of Abbas's wrong present/absent/late):
+                            // read via readDayAttendance() so both the OLD flat
+                            // structure and the NEW sessions/ structure are
+                            // understood, instead of only reading the flat
+                            // checkInTime field directly (which is empty for
+                            // sessions-based records and made present days
+                            // look absent).
+                            val dayAtt = rec?.let { readDayAttendance(it) }
+                            val ci = dayAtt?.checkIn ?: ""
+                            val ciTs = dayAtt?.ciTs ?: 0L
+                            val coTs = dayAtt?.coTs ?: 0L
+                            val st = if (dayAtt?.isLate == true) "LATE" else ""
                             val waive = over.child("waiveDeduction").value as? Boolean ?: false
                             val relief = over.child("fullRelief").value as? Boolean ?: false
                             val otApproved = over.child("overtimeApproved").value as? Boolean ?: false
@@ -393,7 +412,9 @@ class SalaryHistoryActivity : AppCompatActivity() {
                                     }
                                 }
                             } else if (!relief && d < daysToCount && !waive) {
-                                if (d <= daysToCount) absent++
+                                // FIX: only count/deduct absence from the
+                                // employee's first present day onward.
+                                if (d >= firstPresentDay) absent++
                                 deductMins += officeMins.toLong()
                             } else if (relief) presentDates.add(dk)
                             if (otApproved && otHours > 0) otMins += (otHours * 60).toLong()
@@ -732,4 +753,46 @@ class SalaryHistoryActivity : AppCompatActivity() {
     }
 
     private fun showMsg(msg: String) { AlertDialog.Builder(this).setMessage(msg).setPositiveButton("OK", null).show() }
+
+    // FIX: This screen used to read `checkInTime` directly off the date
+    // node. That only works for the OLD flat attendance structure. Newer
+    // records are stored under `sessions/{index}/checkInTime`, so a day the
+    // employee actually attended was being read as empty and counted
+    // absent — mismatching the main Employee screen (e.g. Abbas showing
+    // wrong present/absent/late/score here). This is the exact same helper
+    // already used (and proven correct) in BiometricAttendanceActivity.kt,
+    // copied here so both screens agree on the same attendance data.
+    private data class DayAttendance(
+        val checkIn: String, val checkOut: String, val isLate: Boolean,
+        val ciTs: Long, val coTs: Long, val hasOvertimeSession: Boolean
+    )
+
+    private fun readDayAttendance(daySnap: DataSnapshot): DayAttendance? {
+        val sessSnap = daySnap.child("sessions")
+        if (sessSnap.exists()) {
+            val sessions = sessSnap.children.toList()
+            val firstWithCheckIn = sessions.firstOrNull {
+                (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
+            } ?: return null
+            val checkIn = firstWithCheckIn.child("checkInTime").value?.toString() ?: ""
+            if (checkIn.isEmpty()) return null
+            val lastWithCheckOut = sessions.lastOrNull {
+                (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
+            }
+            val checkOut = lastWithCheckOut?.child("checkOutTime")?.value?.toString() ?: ""
+            val isLate = sessions.any { it.child("status").value?.toString() == "LATE" }
+            val hasOT = sessions.any { it.child("status").value?.toString() == "OVERTIME" }
+            val ciTs = (firstWithCheckIn.child("checkInTimestamp").value as? Long) ?: 0L
+            val coTs = (lastWithCheckOut?.child("checkOutTimestamp")?.value as? Long) ?: 0L
+            return DayAttendance(checkIn, checkOut, isLate, ciTs, coTs, hasOT)
+        }
+        // Legacy flat structure
+        val checkIn = daySnap.child("checkInTime").value?.toString() ?: ""
+        if (checkIn.isEmpty()) return null
+        val checkOut = daySnap.child("checkOutTime").value?.toString() ?: ""
+        val status = daySnap.child("status").value?.toString() ?: ""
+        val ciTs = (daySnap.child("checkInTimestamp").value as? Long) ?: 0L
+        val coTs = (daySnap.child("checkOutTimestamp").value as? Long) ?: 0L
+        return DayAttendance(checkIn, checkOut, status == "LATE", ciTs, coTs, status == "OVERTIME")
+    }
 }

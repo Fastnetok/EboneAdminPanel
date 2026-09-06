@@ -240,9 +240,14 @@ class AllSalaryTotalActivity : AppCompatActivity() {
                                                     val dk = "${monthKey}-${String.format(Locale.getDefault(), "%02d", d)}"
                                                     val rec = recordMap[dk]
                                                     val over = overSnap.child(dk)
-                                                    val ci = rec?.child("checkInTime")?.value?.toString() ?: ""
-                                                    val ciTs = (rec?.child("checkInTimestamp")?.value as? Long) ?: 0L
-                                                    val coTs = (rec?.child("checkOutTimestamp")?.value as? Long) ?: 0L
+                                                    // FIX (root cause of wrong Total Payable/Deductions/Unpaid):
+                                                    // use readDayAttendance() so both the OLD flat structure and
+                                                    // the NEW sessions/ structure are read correctly, instead of
+                                                    // only the flat checkInTime field.
+                                                    val dayAtt = rec?.let { readDayAttendance(it) }
+                                                    val ci = dayAtt?.checkIn ?: ""
+                                                    val ciTs = dayAtt?.ciTs ?: 0L
+                                                    val coTs = dayAtt?.coTs ?: 0L
                                                     val waive = over.child("waiveDeduction").value as? Boolean ?: false
                                                     val relief = over.child("fullRelief").value as? Boolean ?: false
 
@@ -528,5 +533,46 @@ class AllSalaryTotalActivity : AppCompatActivity() {
         background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = 10f*dp; setColor(Color.WHITE) }
         setPadding(px(14,dp), px(12,dp), px(14,dp), px(12,dp))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.bottomMargin = px(10,dp) }
+    }
+
+    // FIX: Same root cause as SalaryHistoryActivity — this screen used to
+    // read `checkInTime` directly off the date node, which is empty for the
+    // newer `sessions/` based attendance records. That made present days
+    // look absent, inflating deductions and shrinking Total Payable, which
+    // in turn skewed Total Unpaid (Payable - Paid). This is the same
+    // session-aware helper already proven correct in
+    // BiometricAttendanceActivity.kt.
+    private data class DayAttendance(
+        val checkIn: String, val checkOut: String, val isLate: Boolean,
+        val ciTs: Long, val coTs: Long, val hasOvertimeSession: Boolean
+    )
+
+    private fun readDayAttendance(daySnap: DataSnapshot): DayAttendance? {
+        val sessSnap = daySnap.child("sessions")
+        if (sessSnap.exists()) {
+            val sessions = sessSnap.children.toList()
+            val firstWithCheckIn = sessions.firstOrNull {
+                (it.child("checkInTime").value?.toString() ?: "").isNotEmpty()
+            } ?: return null
+            val checkIn = firstWithCheckIn.child("checkInTime").value?.toString() ?: ""
+            if (checkIn.isEmpty()) return null
+            val lastWithCheckOut = sessions.lastOrNull {
+                (it.child("checkOutTime").value?.toString() ?: "").isNotEmpty()
+            }
+            val checkOut = lastWithCheckOut?.child("checkOutTime")?.value?.toString() ?: ""
+            val isLate = sessions.any { it.child("status").value?.toString() == "LATE" }
+            val hasOT = sessions.any { it.child("status").value?.toString() == "OVERTIME" }
+            val ciTs = (firstWithCheckIn.child("checkInTimestamp").value as? Long) ?: 0L
+            val coTs = (lastWithCheckOut?.child("checkOutTimestamp")?.value as? Long) ?: 0L
+            return DayAttendance(checkIn, checkOut, isLate, ciTs, coTs, hasOT)
+        }
+        // Legacy flat structure
+        val checkIn = daySnap.child("checkInTime").value?.toString() ?: ""
+        if (checkIn.isEmpty()) return null
+        val checkOut = daySnap.child("checkOutTime").value?.toString() ?: ""
+        val status = daySnap.child("status").value?.toString() ?: ""
+        val ciTs = (daySnap.child("checkInTimestamp").value as? Long) ?: 0L
+        val coTs = (daySnap.child("checkOutTimestamp").value as? Long) ?: 0L
+        return DayAttendance(checkIn, checkOut, status == "LATE", ciTs, coTs, status == "OVERTIME")
     }
 }

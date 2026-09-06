@@ -53,7 +53,12 @@
         <activity android:name=".AssignComplaintsActivity" android:exported="false" />
         <activity android:name=".GeoFenceManagementActivity" android:exported="false" />
         <activity android:name=".AddComplaintActivity" android:exported="false" />
-        <activity android:name=".WebViewLoginActivity" android:exported="false" />
+
+        <activity
+            android:name=".WebViewLoginActivity"
+            android:exported="false"
+            android:launchMode="singleTask" />
+
         <activity android:name=".TotalComplaintsActivity" android:exported="false" />
         <activity android:name=".EmployeeComplaintsActivity" android:exported="false" />
         <activity android:name=".PendingSummaryActivity" android:exported="false" />
@@ -95,6 +100,15 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity android:name=".CustomerBillingActivity" android:exported="false" />
+
+        <activity
+            android:name=".ReliefPackageActivity"
+            android:exported="false" />
+
+        <!-- FIX: CustomerBillingActivity launches this Activity. -->
+        <activity android:name=".UnpaidPackageActivationActivity" android:exported="false" />
+        <activity android:name=".ReliefLogActivity" />
+
         <activity android:name=".AddCustomerActivity" android:exported="false" />
         <activity android:name=".IspPanelSettingsActivity" android:exported="false" />
         <activity android:name=".AddEmployeeActivity" android:exported="false" />
@@ -108,15 +122,17 @@
         <activity android:name=".AllSalaryTotalActivity" android:exported="false" />
         <activity android:name=".OfficeTimmingsActivity" android:exported="false" />
 
+        <!-- NEW: opened from CustomerBillingActivity's top-left ☰ menu
+             button — lets admin enable/disable which payment methods
+             (Easypaisa, JazzCash, Faysal Bank, etc.) show up on the
+             Customer ID App's payment screen. Deliberately NOT added to
+             MenuActivity / the main admin menu, per explicit instruction. -->
+        <activity android:name=".PaymentMethodSettingsActivity" android:exported="false" />
+
         <!-- Dealer Panel -->
         <activity android:name=".DealerPanelActivity" android:exported="false" />
         <activity android:name=".DealerDashboardActivity" android:exported="false" />
         <activity android:name=".DealerMenuActivity" android:exported="false" />
-        <!-- NEW: these two were present in the codebase but never
-             registered here — SendDealerPaymentActivity crashed with
-             ActivityNotFoundException; DealerPaymentLogActivity (the 📄
-             Payment Log screen) would have crashed the same way the
-             first time it was opened. -->
         <activity android:name=".SendDealerPaymentActivity" android:exported="false" />
         <activity android:name=".DealerPaymentLogActivity" android:exported="false" />
 

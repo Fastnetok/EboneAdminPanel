@@ -9,14 +9,40 @@
     android:padding="12dp"
     android:background="#FFFFFF">
 
-    <TextView
-        android:id="@+id/employeeNameText"
+    <!-- Employee Name + Dynamic Company Badge -->
+    <RelativeLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Abbas"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:textColor="#000000"/>
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/employeeNameText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Abbas"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#000000"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true" />
+
+        <TextView
+            android:id="@+id/tvLogCompany"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_log_company_badge"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text=""
+            android:textColor="#4C5FD5"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:visibility="gone" />
+
+    </RelativeLayout>
 
     <TextView
         android:id="@+id/userIdText"
@@ -60,12 +86,6 @@
             android:layout_alignParentStart="true"
             android:layout_centerVertical="true"/>
 
-        <!--
-            seenTimeText aur seenStatusIcon ab dynamic hain.
-            In ki Text/Icon/Visibility ProgressAdapter.kt se
-            complaint.seenByEmployee aur complaint.seenTime
-            ke mutabiq set hoti hai — koi hardcoded value nahi.
-        -->
         <TextView
             android:id="@+id/seenTimeText"
             android:layout_width="wrap_content"
