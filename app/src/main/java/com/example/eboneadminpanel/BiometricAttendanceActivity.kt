@@ -501,9 +501,9 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             it.layoutParams = llp().also { m -> m.bottomMargin = px(12, dp) }
         })
 
-        // Waive Deduction
-        addControlButton(layout, "Waive Deduction", "#E65100", "#FFF3E0",
-            "Remove late/absent penalty for this day", dp) {
+        // Waive Deduction (Renamed to Fix Attendance)
+        addControlButton(layout, "Fix Attendance (Mark On Time)", "#2E7D32", "#E8F5E9",
+            "System error ki wajah se attendance theek karein", dp) {
             showWaiveDialog(dayKey, "waiveDeduction")
         }
 
@@ -574,7 +574,7 @@ class BiometricAttendanceActivity : AppCompatActivity() {
             setPadding(px(12, dp), px(10, dp), px(12, dp), px(10, dp))
         }
         AlertDialog.Builder(this)
-            .setTitle(if (type == "fullRelief") "Full Day Relief" else "Waive Deduction")
+            .setTitle(if (type == "fullRelief") "Full Day Relief" else "Fix Attendance")
             .setView(etReason)
             .setPositiveButton("Confirm") { _, _ ->
                 val reason = etReason.text.toString().trim().ifEmpty { "Admin approved" }
@@ -1270,7 +1270,7 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                         isFuture -> { badgeText = "—"; badgeColor = Color.parseColor("#CCCCCC"); badgeBg = Color.parseColor("#F5F5F5") }
                         fullRelief -> { badgeText = "Paid Leave"; badgeColor = Color.parseColor("#1565C0"); badgeBg = Color.parseColor("#E3F2FD") }
                         otApproved -> { badgeText = "Overtime"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
-                        waived -> { badgeText = "Waived"; badgeColor = Color.parseColor("#E65100"); badgeBg = Color.parseColor("#FFF3E0") }
+                        waived -> { badgeText = "On Time"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
                         status == "ON_TIME" -> { badgeText = "On Time"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
                         status == "LATE" -> { badgeText = "Late"; badgeColor = Color.parseColor("#C62828"); badgeBg = Color.parseColor("#FFEBEE") }
                         status == "OVERTIME" -> { badgeText = "Overtime"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
