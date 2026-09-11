@@ -30,6 +30,8 @@ data class Complaint(
 
     var seenTime: Long = 0,
 
-    var company: String = ""
+    var company: String = "",
+
+    var isNewConnection: Boolean = false
 
 )

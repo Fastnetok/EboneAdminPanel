@@ -138,6 +138,15 @@
             android:textSize="18sp"/>
 
         <TextView
+            android:id="@+id/menuAutoComplaintMonitor"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:text="Auto Complaint Monitor"
+            android:textSize="18sp"/>
+
+        <TextView
             android:id="@+id/menuSettings"
             android:layout_width="match_parent"
             android:layout_height="55dp"

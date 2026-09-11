@@ -98,13 +98,11 @@ class TotalComplaintsActivity :
                                         complaint
                                         in complaintSnapshot.children
                                         ) {
+                                            val isNew = complaint.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                            val assignedTo = complaint.child("assignedTo").getValue(String::class.java) ?: ""
 
-                                            val assignedTo =
-                                                complaint.child(
-                                                    "assignedTo"
-                                                ).getValue(
-                                                    String::class.java
-                                                ) ?: continue
+                                            // SKIP New Connections from Total Complaints list
+                                            if (isNew || assignedTo == "NEW_CONNECTION_DASHBOARD") continue
 
                                             val status =
                                                 complaint.child(

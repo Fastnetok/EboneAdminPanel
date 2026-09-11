@@ -235,7 +235,14 @@ class ReliefLogActivity : AppCompatActivity() {
 
         rangeStart = startCal.timeInMillis
         rangeEnd = endCal.timeInMillis
-        tvRangeLabel.text = label
+        
+        // FIX: Remove redundant "Today" sub-label
+        if (label == "Today") {
+            tvRangeLabel.visibility = View.GONE
+        } else {
+            tvRangeLabel.visibility = View.VISIBLE
+            tvRangeLabel.text = label
+        }
 
         selectedChip?.isSelected = false
         selectedChip?.setTextColor(chipTextColor(false))
@@ -407,8 +414,8 @@ class ReliefLogActivity : AppCompatActivity() {
             val company: TextView = view.findViewById(R.id.tvLogCompany)
             val activatedAt: TextView = view.findViewById(R.id.tvLogActivatedAt)
             val reliefDays: TextView = view.findViewById(R.id.tvLogReliefDays)
-            val expiryAt: TextView = view.findViewById(R.id.tvLogExpiryAt)
             val deactivatedAt: TextView = view.findViewById(R.id.tvLogDeactivatedAt)
+            val countdown: TextView = view.findViewById(R.id.tvLogCountdown)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -443,8 +450,26 @@ class ReliefLogActivity : AppCompatActivity() {
                 else -> "Promised Relief: —"
             }
 
-            holder.expiryAt.text =
-                "Expected Expiry: ${if (expectedExpiryAt > 0) displayFormat.format(expectedExpiryAt) else "—"}"
+            // ---- Corrected Countdown Logic (Ensures 24h per day regardless of saved data) ----
+            if (deactivatedAt == null || deactivatedAt == 0L) {
+                val now = System.currentTimeMillis()
+                
+                // Recalculate expiry strictly: Start Time + (Days * 24 Hours)
+                val correctedExpiry = activatedAt + (reliefDays * 24L * 60 * 60 * 1000)
+                
+                val diff = correctedExpiry - now
+                if (diff > 0) {
+                    val hours = diff / (1000 * 60 * 60)
+                    val minutes = (diff / (1000 * 60)) % 60
+                    holder.countdown.text = String.format("%02dh %02dm left", hours, minutes)
+                    holder.countdown.visibility = View.VISIBLE
+                } else {
+                    holder.countdown.text = "EXPIRED"
+                    holder.countdown.visibility = View.VISIBLE
+                }
+            } else {
+                holder.countdown.visibility = View.GONE
+            }
 
             if (deactivatedAt != null && deactivatedAt > 0) {
                 holder.deactivatedAt.text =

@@ -59,6 +59,10 @@ class MenuActivity : BaseAdminActivity() {
             startActivity(Intent(this, DealerDashboardActivity::class.java))
         }
 
+        findViewById<TextView>(R.id.menuAutoComplaintMonitor).setOnClickListener {
+            startActivity(Intent(this, AutoComplaintMonitorActivity::class.java))
+        }
+
         findViewById<TextView>(R.id.menuSmsMatchSettings).setOnClickListener {
             startActivity(Intent(this, SmsMatchSettingsActivity::class.java))
         }

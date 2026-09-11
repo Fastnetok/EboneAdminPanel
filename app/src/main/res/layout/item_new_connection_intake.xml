@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="6dp"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#FFFFFF">
+
+    <!-- Top Row: Customer Name and Assigned Employee -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:id="@+id/tvCustomerName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Customer Name"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#000000"
+            android:layout_alignParentStart="true" />
+
+        <TextView
+            android:id="@+id/tvAssignedTo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Employee Name"
+            android:textColor="#E53935"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:visibility="gone" />
+
+    </RelativeLayout>
+
+    <TextView
+        android:id="@+id/tvAddress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:text="Address"
+        android:textColor="#555555"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/tvPhone"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Phone Number"
+        android:textColor="#555555"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/tvComments"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Comments..."
+        android:textColor="#1565C0"
+        android:textSize="14sp" />
+
+    <!-- Bottom Status Row: WhatsApp Style Ticks -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/tvCreatedTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Created: 10:30 AM"
+            android:textSize="13sp"
+            android:textColor="#757575"
+            android:layout_alignParentStart="true" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvSeenTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="10:30 AM"
+                android:textColor="#757575"
+                android:textSize="13sp"
+                android:visibility="gone"
+                android:layout_marginEnd="4dp" />
+
+            <ImageView
+                android:id="@+id/ivSeenStatus"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:src="@drawable/ic_single_tick"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+
+    <!-- Professional Buttons Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp">
+
+        <Button
+            android:id="@+id/btnEdit"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="42dp"
+            android:text="EDIT"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#1976D2"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp" />
+
+        <Button
+            android:id="@+id/btnDelete"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="42dp"
+            android:layout_marginStart="4dp"
+            android:text="DELETE"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#D32F2F"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp" />
+
+        <Button
+            android:id="@+id/btnMove"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="42dp"
+            android:layout_marginStart="4dp"
+            android:text="MOVE"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#7E57C2"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp" />
+
+        <Button
+            android:id="@+id/btnAssign"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="42dp"
+            android:layout_marginStart="4dp"
+            android:text="ASSIGN"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#388E3C"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp" />
+
+        <Button
+            android:id="@+id/btnInstall"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="42dp"
+            android:layout_marginStart="4dp"
+            android:text="INSTAL"
+            android:textSize="10sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#4CAF50"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</LinearLayout>

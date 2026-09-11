@@ -103,6 +103,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
     private var zongNavigationStep = 0
     private var zongLastTrailUrl = ""
+    private var complaintIdToResolve: String? = null
 
     companion object {
         // TEMPORARY TEST VALUE — set to "Tetra9" at the admin's explicit
@@ -209,6 +210,7 @@ class WebViewLoginActivity : AppCompatActivity() {
         sourceTransactionId = intent.getStringExtra("source_transaction_id")
         dealerSearchName = intent.getStringExtra("dealer_search_name")
         targetZone = intent.getStringExtra("target_zone")?.ifBlank { null } ?: "Okara"
+        complaintIdToResolve = intent.getStringExtra("complaint_id_to_resolve")
 
         forceAccountName = intent.getStringExtra("dealer_account_name")
         customerUrlOverride = intent.getStringExtra("customer_url")?.trim()?.takeIf { it.isNotBlank() }
@@ -293,7 +295,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                                 tryAutoLogin()
                             }
                         }
-                    }, 600)
+                    }, 100)
                 }
             }
 
@@ -404,22 +406,20 @@ class WebViewLoginActivity : AppCompatActivity() {
 
         if (!ispUsername.isNullOrEmpty()) {
             val savedCookie = getIspSessionCookie(selectedIsp)
-            clearCookiesForDomain(domainFor(selectedIsp))
+            // FIX: Don't aggressively clear cookies at the start. 
+            // This allows the browser to keep the "mazboot" session alive.
 
             if (savedCookie.isNotEmpty()) {
-                CookieManager.getInstance().setCookie(domainFor(selectedIsp), savedCookie)
+                val domain = domainFor(selectedIsp)
+                // Restore each cookie part individually for better reliability
+                savedCookie.split(";").forEach {
+                    CookieManager.getInstance().setCookie(domain, it.trim())
+                }
                 CookieManager.getInstance().flush()
                 webView.loadUrl(clientsUrlFor(selectedIsp))
             } else {
                 webView.loadUrl(loginUrlFor(selectedIsp))
             }
-            return
-        }
-
-        if (!targetZone.equals("Okara", ignoreCase = true)) {
-            CookieManager.getInstance().removeAllCookies(null)
-            CookieManager.getInstance().flush()
-            webView.loadUrl(loginUrlFor(selectedIsp))
             return
         }
 
@@ -698,6 +698,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 fetchZongCustomerDetails()
             }
             selectedIsp == "EBONE" && url.contains("partner.ebill.pk") &&
+                    !url.contains("/login") &&
                     !url.contains("/clients/client/") && !url.contains("/clients/clientStats/") &&
                     !url.contains("/clients/clientChange/") &&
                     !url.contains("/payments/addbalance/") -> {
@@ -707,19 +708,25 @@ class WebViewLoginActivity : AppCompatActivity() {
                 webView.evaluateJavascript(
                     "document.querySelectorAll('.modal,.modal-backdrop,.popup').forEach(function(el){el.style.display='none';});document.body.classList.remove('modal-open');", null
                 )
-                if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
+                if (manualAction == "RESOLVE_MONITOR" && autoActivateCustomerId != null) {
+                    if (!url.contains("/clients")) {
+                        webView.loadUrl("https://partner.ebill.pk/clients")
+                    } else {
+                        performVisualAutoResolve("input[aria-controls=\"example1\"]", "Online Customers")
+                    }
+                } else if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
                     webView.postDelayed({
                         webView.loadUrl("https://partner.ebill.pk/payments/addbalance/${dealerEboneId}")
-                    }, 800)
+                    }, 300)
                 } else if (manualAction == "CHECK_BALANCE") {
                     if (!eboneBalanceCheckAttempted) {
                         eboneBalanceCheckAttempted = true
-                        webView.postDelayed({ readEboneFranchiseBalance() }, 800)
+                        webView.postDelayed({ readEboneFranchiseBalance() }, 300)
                     }
                 } else if (!url.contains("/clients")) {
-                    webView.postDelayed({ webView.loadUrl("https://partner.ebill.pk/clients") }, 800)
+                    webView.postDelayed({ webView.loadUrl("https://partner.ebill.pk/clients") }, 300)
                 } else if (autoActivateCustomerId != null) {
-                    webView.postDelayed({ searchEboneCustomer(autoActivateCustomerId!!) }, 800)
+                    webView.postDelayed({ searchEboneCustomer(autoActivateCustomerId!!) }, 300)
                 }
             }
             selectedIsp == "WATEEN" && url.contains("panel.wateen.com") &&
@@ -728,7 +735,13 @@ class WebViewLoginActivity : AppCompatActivity() {
                 loginDone = true
                 saveCookieForCurrentAccount("https://panel.wateen.com")
                 cacheIspSessionCookieIfApplicable("WATEEN", "https://panel.wateen.com")
-                if ((manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) ||
+                if (manualAction == "RESOLVE_MONITOR" && autoActivateCustomerId != null) {
+                    if (!url.contains("/user/user/online")) {
+                        webView.loadUrl("https://panel.wateen.com/user/user/online")
+                    } else {
+                        performVisualAutoResolve("input[aria-controls=\"allonlineUsers\"]", "")
+                    }
+                } else if ((manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) ||
                     (manualAction == "FETCH_DEALER_ID" && !dealerSearchName.isNullOrBlank())) {
                     if (!wateenDealerListLoadAttempted) {
                         wateenDealerListLoadAttempted = true
@@ -767,30 +780,35 @@ class WebViewLoginActivity : AppCompatActivity() {
                 }
             }
             selectedIsp == "ZONG" && url.contains("turbonet.zong.com.pk") &&
-                    !url.contains("login.php") && !url.contains("customer_portal.php") &&
-                    !url.contains("sub_dealers.php") -> {
+                    !url.contains("login.php") -> {
                 loginDone = true
                 if (!zongDealerMode) {
                     saveCookieForCurrentAccount("https://turbonet.zong.com.pk")
                     cacheIspSessionCookieIfApplicable("ZONG", "https://turbonet.zong.com.pk")
                 }
-                if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
+                if (manualAction == "RESOLVE_MONITOR" && autoActivateCustomerId != null) {
+                    if (!url.contains("radius_online_customers.php")) {
+                        webView.loadUrl("https://turbonet.zong.com.pk/radius_online_customers.php")
+                    } else {
+                        performVisualAutoResolve("input[aria-controls=\"onlinecustomers\"]", "")
+                    }
+                } else if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
                     if (!zongDealerListLoadAttempted) {
                         zongDealerListLoadAttempted = true
-                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/sub_dealers.php") }, 800)
+                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/sub_dealers.php") }, 300)
                     }
                 } else if (manualAction == "CHECK_BALANCE") {
                     val onSuitableZongPage = !url.contains("customers.php")
                     if (onSuitableZongPage) {
                         if (!zongBalanceCheckAttempted) {
                             zongBalanceCheckAttempted = true
-                            webView.postDelayed({ readZongFranchiseBalance() }, 1500)
+                            webView.postDelayed({ readZongFranchiseBalance() }, 500)
                         }
                     } else if (!zongBalanceCheckAttempted) {
-                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/index.php") }, 800)
+                        webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/index.php") }, 300)
                     }
                 } else if (!url.contains("customers.php")) {
-                    webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/customers.php") }, 800)
+                    webView.postDelayed({ webView.loadUrl("https://turbonet.zong.com.pk/customers.php") }, 300)
                 } else {
                     webView.evaluateJavascript(
                         "(function(){" +
@@ -800,7 +818,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     )
                     webView.postDelayed({
                         autoActivateCustomerId?.let { id -> searchZongCustomer(id) }
-                    }, 2000)
+                    }, 500)
                 }
             }
             selectedIsp == "ZONG" && url.contains("sub_dealers.php") && manualAction == "DEALER_TOPUP" -> {
@@ -882,12 +900,11 @@ class WebViewLoginActivity : AppCompatActivity() {
                 if (result == "fields_not_ready" && attempt < 6) {
                     doLoginWith(username, password, attempt + 1)
                 } else {
+                    loginDone = (result == "submitted" || result == "submitted_no_button")
                     loginAttemptInProgress = false
-                    if (result == "fields_not_ready") {
-                    }
                 }
             }
-        }, if (attempt == 1) 1800L else 900L)
+        }, if (attempt == 1) 300L else 300L)
     }
 
     private fun writeActivationResultToFirestore(success: Boolean, expiry: String) {
@@ -2396,7 +2413,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                         var valueTd = cells[cells.length - 1];
                         var value = valueTd ? valueTd.textContent.trim() : '';
                         if (label === 'PPPoE Auth User') { userId = value; }
-                        else if (label === 'Address') { address = value; }
+                        else if (label.indexOf('Address') > -1) { address = value; }
                         else if (label === 'Mobile') { phone = value; }
                     }
                     break;
@@ -2579,5 +2596,55 @@ class WebViewLoginActivity : AppCompatActivity() {
                 finish()
             }
         } catch (e: Exception) {}
+    }
+
+    private fun performVisualAutoResolve(searchSelector: String, successTag: String) {
+        val custId = autoActivateCustomerId ?: return
+        webView.evaluateJavascript("""
+            (function(){
+                var searchBox = document.querySelector('$searchSelector');
+                if(searchBox){
+                    searchBox.value = '$custId';
+                    searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+                    searchBox.dispatchEvent(new Event('keyup', { bubbles: true }));
+                    return 'searching';
+                }
+                return 'box_not_found';
+            })()
+        """.trimIndent()) { result ->
+            if (result.contains("searching")) {
+                webView.postDelayed({
+                    webView.evaluateJavascript("""
+                        (function(){
+                            var bodyText = document.body.innerText;
+                            var tagFound = '$successTag' === '' || bodyText.indexOf('$successTag') > -1;
+                            if(bodyText.indexOf('$custId') > -1 && tagFound){
+                                return 'found_online';
+                            }
+                            return 'not_found_yet';
+                        })()
+                    """.trimIndent()) { status ->
+                        if (status.contains("found_online")) {
+                            val cId = complaintIdToResolve
+                            if (cId != null) {
+                                val fb = com.google.firebase.database.FirebaseDatabase.getInstance()
+                                val updates = mapOf(
+                                    "status" to "Resolved",
+                                    "resolvedTime" to System.currentTimeMillis(),
+                                    "resolvedBy" to "System Visual Monitor",
+                                    "is_system_resolved" to true
+                                )
+                                fb.getReference("complaints").child(cId).updateChildren(updates)
+                                    .addOnSuccessListener {
+                                        fb.getReference("resolvedComplaints").child(cId).setValue(true)
+                                        Toast.makeText(this, "Complaint Resolved Successfully!", Toast.LENGTH_SHORT).show()
+                                        finish()
+                                    }
+                            }
+                        }
+                    }
+                }, 4000)
+            }
+        }
     }
 }

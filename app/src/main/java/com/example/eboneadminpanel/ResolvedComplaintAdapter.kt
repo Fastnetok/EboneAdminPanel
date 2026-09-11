@@ -49,6 +49,9 @@ class ResolvedComplaintAdapter(
 
         val resolveButton: Button =
             itemView.findViewById(R.id.resolveButton)
+
+        val undoButton: Button =
+            itemView.findViewById(R.id.undoButton)
     }
 
     override fun onCreateViewHolder(
@@ -119,6 +122,40 @@ class ResolvedComplaintAdapter(
          */
         holder.resolveButton.visibility =
             View.GONE
+
+        /*
+         * UNDO button - Resolved complaints کو واپس Progress میں لانے کے لیے
+         */
+        holder.undoButton.visibility = View.VISIBLE
+        holder.undoButton.setOnClickListener {
+            AlertDialog.Builder(context)
+                .setTitle("Undo Resolution")
+                .setMessage("Kya aap is complaint ko wapas Progress mein lana chahte hain?")
+                .setPositiveButton("Yes") { _, _ ->
+                    val fb = FirebaseDatabase.getInstance()
+                    val updates = mapOf(
+                        "status" to "Progress",
+                        "resolvedTime" to 0,
+                        "resolvedBy" to "",
+                        "is_system_resolved" to false
+                    )
+                    
+                    fb.getReference("complaints").child(complaint.complaintId)
+                        .updateChildren(updates)
+                        .addOnSuccessListener {
+                            // Remove from resolvedComplaints node
+                            fb.getReference("resolvedComplaints").child(complaint.complaintId).removeValue()
+                            
+                            // Let the Activity's ValueEventListener handle the list update
+                            Toast.makeText(context, "Complaint moved back to Progress", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(context, "Undo failed", Toast.LENGTH_SHORT).show()
+                        }
+                }
+                .setNegativeButton("No", null)
+                .show()
+        }
 
         /*
          * Resolved Date / Time

@@ -130,6 +130,18 @@
             android:textColor="#FFFFFF"
             android:backgroundTint="#FF9800"/>
 
+        <Button
+            android:id="@+id/undoButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="40dp"
+            android:layout_marginStart="4dp"
+            android:text="UNDO"
+            android:textSize="11sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#607D8B"
+            android:visibility="gone"/>
+
     </LinearLayout>
 
 </LinearLayout>

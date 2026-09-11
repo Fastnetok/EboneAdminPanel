@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#F0F4F8">
+
+    <!-- ہیڈر (Fancy Header) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:background="#1A237E"
+        android:gravity="center_vertical"
+        android:paddingTop="30dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp">
+
+        <TextView
+            android:id="@+id/btnBack"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="←"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:padding="8dp" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="15dp"
+            android:text="NEW CONNECTION"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/btnEmployeeConfig"
+            android:layout_width="45dp"
+            android:layout_height="45dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_manage"
+            app:tint="#FFFFFF" />
+
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- کارڈز کا گرڈ -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="vertical"
+                android:padding="10dp">
+
+        <!-- ROW 1: TOTAL + PENDING -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/cardTotal"
+                android:layout_width="0dp"
+                android:layout_height="100dp"
+                android:layout_weight="1"
+                android:layout_margin="6dp"
+                android:background="#3F51B5"
+                android:gravity="center"
+                android:text="0\nTOTAL"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/cardPending"
+                android:layout_width="0dp"
+                android:layout_height="100dp"
+                android:layout_weight="1"
+                android:layout_margin="6dp"
+                android:background="#FF5252"
+                android:gravity="center"
+                android:text="0\nPENDING"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- ROW 2: PROGRESS + INSTALLED -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/cardProgress"
+                android:layout_width="0dp"
+                android:layout_height="100dp"
+                android:layout_weight="1"
+                android:layout_margin="6dp"
+                android:background="#FFA000"
+                android:gravity="center"
+                android:text="0\nPROGRESS"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/cardInstalled"
+                android:layout_width="0dp"
+                android:layout_height="100dp"
+                android:layout_weight="1"
+                android:layout_margin="6dp"
+                android:background="#4CAF50"
+                android:gravity="center"
+                android:text="0\nINSTALLED"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+            <!-- اندراج کا فارم (The Form) - Modern Premium Design -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_margin="12dp"
+                android:padding="20dp"
+                android:background="@drawable/bg_nc_premium_card"
+                android:elevation="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="CREATE NEW CONNECTION"
+                    android:textColor="#1A237E"
+                    android:textSize="17sp"
+                    android:letterSpacing="0.05"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:layout_marginBottom="20dp" />
+
+                <EditText
+                    android:id="@+id/etNcName"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:hint="User ID"
+                    android:background="@drawable/bg_spinner"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:textSize="14sp"
+                    android:textColor="#1F2937"
+                    android:inputType="textFilter|textNoSuggestions|textVisiblePassword"
+                    android:importantForAutofill="no"
+                    tools:ignore="TextFields"
+                    android:layout_marginBottom="12dp" />
+
+                <EditText
+                    android:id="@+id/etNcAddress"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:hint="Address"
+                    android:background="@drawable/bg_spinner"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:textSize="14sp"
+                    android:textColor="#1F2937"
+                    android:inputType="textLongMessage"
+                    android:layout_marginBottom="12dp" />
+
+                <EditText
+                    android:id="@+id/etNcPhone"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:hint="Phone Number"
+                    android:inputType="text"
+                    android:background="@drawable/bg_spinner"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:textSize="14sp"
+                    android:textColor="#1F2937"
+                    android:layout_marginBottom="12dp" />
+
+                <EditText
+                    android:id="@+id/etNcComments"
+                    android:layout_width="match_parent"
+                    android:layout_height="110dp"
+                    android:hint="Connection Details (Tap to Type)"
+                    android:gravity="top"
+                    android:padding="12dp"
+                    android:textSize="14sp"
+                    android:textColor="#1F2937"
+                    android:background="@drawable/bg_spinner"
+                    android:focusable="false"
+                    android:clickable="true"
+                    android:layout_marginBottom="24dp" />
+
+                <Button
+                    android:id="@+id/btnAssignNc"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:text="ASSIGN TO AGENT"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:letterSpacing="0.1"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_nc_button_premium"
+                    app:backgroundTint="@null" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

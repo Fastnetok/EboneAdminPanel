@@ -354,12 +354,73 @@ class BiometricAttendanceActivity : AppCompatActivity() {
 
     // ─────────────── OFFICE HOURS EDIT ───────────────
 
+    private fun showMinutePickerForOfficeHours(title: String, currentVal: Int, onSelected: (Int) -> Unit) {
+        val dp = resources.displayMetrics.density
+        val et = EditText(this).apply {
+            hint = "Minutes"; inputType = InputType.TYPE_CLASS_NUMBER
+            setText("$currentVal")
+            setPadding(px(16, dp), px(12, dp), px(16, dp), px(12, dp))
+        }
+
+        val layout = LinearLayout(this).apply { 
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(24, dp), px(8, dp), px(24, dp), px(8, dp)) 
+        }
+        layout.addView(et)
+
+        val hsv = HorizontalScrollView(this).apply {
+            layoutParams = llp().also { it.topMargin = px(12, dp) }
+            isHorizontalScrollBarEnabled = false
+        }
+        val quickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        }
+        
+        val options = listOf(
+            15 to "15m", 30 to "30m", 45 to "45m", 
+            60 to "1h", 120 to "2h", 180 to "3h", 
+            240 to "4h", 300 to "5h"
+        )
+        
+        options.forEach { (mins, label) ->
+            Button(this).apply {
+                text = label; textSize = 11f
+                setTextColor(Color.parseColor("#1565C0"))
+                background = GradientDrawable().apply { 
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 8f * dp
+                    setColor(Color.parseColor("#E3F2FD")) 
+                }
+                setPadding(px(12, dp), px(6, dp), px(12, dp), px(6, dp))
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 
+                    px(36, dp)
+                ).also { it.marginEnd = px(8, dp) }
+                layoutParams = lp
+                setOnClickListener { et.setText("$mins") }
+            }.also { quickRow.addView(it) }
+        }
+        hsv.addView(quickRow)
+        layout.addView(hsv)
+
+        AlertDialog.Builder(this).setTitle(title).setView(layout)
+            .setPositiveButton("OK") { _, _ ->
+                val value = et.text.toString().toIntOrNull() ?: return@setPositiveButton
+                onSelected(value)
+            }
+            .setNegativeButton("Cancel", null).show()
+    }
+
     private fun showEditOfficeHoursDialog() {
         val dp = resources.displayMetrics.density
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(px(24, dp), px(16, dp), px(24, dp), px(8, dp))
         }
+
+        var tempGrace = gracePeriodMinutes
+        var tempPreShift = preShiftMinutes
+        var tempPostShift = postShiftMinutes
 
         layout.addView(tv("Start Hour (0-23)", 12f, Color.parseColor("#757575")).also {
             it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
@@ -401,42 +462,65 @@ class BiometricAttendanceActivity : AppCompatActivity() {
         }
         layout.addView(etEndMin)
 
-        // FIX (requested): Grace Period, Pre-Shift Window, and Post-Shift
-        // Window are now real, editable, variable settings — 15/30/45/60
-        // minutes each — instead of grace being silently hardcoded to 15
-        // and pre/post-shift never being saved from the Admin panel at all.
-        val minuteOptions = arrayOf("15 minutes", "30 minutes", "45 minutes", "60 minutes")
-        fun minutesToIndex(m: Int) = when (m) { 15 -> 0; 30 -> 1; 45 -> 2; 60 -> 3; else -> 3 }
-
+        // Grace Period Row
         layout.addView(tv("Grace Period (Late Threshold)", 12f, Color.parseColor("#757575")).also {
             it.layoutParams = llp().also { m -> m.topMargin = px(4, dp); m.bottomMargin = px(4, dp) }
         })
-        val spinnerGrace = Spinner(this).apply {
-            adapter = ArrayAdapter(this@BiometricAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, minuteOptions)
-            setSelection(minutesToIndex(gracePeriodMinutes))
-            layoutParams = llp().also { it.bottomMargin = px(10, dp) }
+        val tvGrace = tv("${tempGrace} min", 14f, Color.parseColor("#1565C0"), bold = true).apply {
+            layoutParams = llp().also { it.bottomMargin = px(12, dp) }
+            setPadding(px(8, dp), px(8, dp), px(8, dp), px(8, dp))
+            background = GradientDrawable().apply { 
+                shape = GradientDrawable.RECTANGLE; cornerRadius = 4f * dp
+                setStroke(px(1, dp), Color.parseColor("#DDDDDD"))
+            }
+            setOnClickListener {
+                showMinutePickerForOfficeHours("Grace Period (min)", tempGrace) { value ->
+                    tempGrace = value
+                    text = "${value} min"
+                }
+            }
         }
-        layout.addView(spinnerGrace)
+        layout.addView(tvGrace)
 
+        // Pre-Shift Window Row
         layout.addView(tv("Pre-Shift Window (Early Check-in Allowed)", 12f, Color.parseColor("#757575")).also {
             it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
         })
-        val spinnerPreShift = Spinner(this).apply {
-            adapter = ArrayAdapter(this@BiometricAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, minuteOptions)
-            setSelection(minutesToIndex(preShiftMinutes))
-            layoutParams = llp().also { it.bottomMargin = px(10, dp) }
+        val tvPreShift = tv("${tempPreShift} min", 14f, Color.parseColor("#1565C0"), bold = true).apply {
+            layoutParams = llp().also { it.bottomMargin = px(12, dp) }
+            setPadding(px(8, dp), px(8, dp), px(8, dp), px(8, dp))
+            background = GradientDrawable().apply { 
+                shape = GradientDrawable.RECTANGLE; cornerRadius = 4f * dp
+                setStroke(px(1, dp), Color.parseColor("#DDDDDD"))
+            }
+            setOnClickListener {
+                showMinutePickerForOfficeHours("Pre-Shift Window (min)", tempPreShift) { value ->
+                    tempPreShift = value
+                    text = "${value} min"
+                }
+            }
         }
-        layout.addView(spinnerPreShift)
+        layout.addView(tvPreShift)
 
+        // Post-Shift Window Row
         layout.addView(tv("Post-Shift Window (Overtime Threshold)", 12f, Color.parseColor("#757575")).also {
             it.layoutParams = llp().also { m -> m.bottomMargin = px(4, dp) }
         })
-        val spinnerPostShift = Spinner(this).apply {
-            adapter = ArrayAdapter(this@BiometricAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, minuteOptions)
-            setSelection(minutesToIndex(postShiftMinutes))
-            layoutParams = llp()
+        val tvPostShift = tv("${tempPostShift} min", 14f, Color.parseColor("#1565C0"), bold = true).apply {
+            layoutParams = llp().also { it.bottomMargin = px(12, dp) }
+            setPadding(px(8, dp), px(8, dp), px(8, dp), px(8, dp))
+            background = GradientDrawable().apply { 
+                shape = GradientDrawable.RECTANGLE; cornerRadius = 4f * dp
+                setStroke(px(1, dp), Color.parseColor("#DDDDDD"))
+            }
+            setOnClickListener {
+                showMinutePickerForOfficeHours("Post-Shift Window (min)", tempPostShift) { value ->
+                    tempPostShift = value
+                    text = "${value} min"
+                }
+            }
         }
-        layout.addView(spinnerPostShift)
+        layout.addView(tvPostShift)
 
         val scroll = android.widget.ScrollView(this).apply { addView(layout) }
 
@@ -448,28 +532,20 @@ class BiometricAttendanceActivity : AppCompatActivity() {
                 val sm = etStartMin.text.toString().toIntOrNull() ?: 0
                 val eh = etEndHour.text.toString().toIntOrNull() ?: return@setPositiveButton
                 val em = etEndMin.text.toString().toIntOrNull() ?: 0
-                val grace = (spinnerGrace.selectedItemPosition + 1) * 15
-                val preShift = (spinnerPreShift.selectedItemPosition + 1) * 15
-                val postShift = (spinnerPostShift.selectedItemPosition + 1) * 15
                 val data = mapOf(
                     "startHour" to sh, "startMinute" to sm,
                     "endHour" to eh, "endMinute" to em,
-                    "gracePeriodMinutes" to grace,
-                    "preShiftMinutes" to preShift,
-                    "postShiftMinutes" to postShift
+                    "gracePeriodMinutes" to tempGrace,
+                    "preShiftMinutes" to tempPreShift,
+                    "postShiftMinutes" to tempPostShift
                 )
-                // FIX: was setValue(data), which REPLACES the entire
-                // officeSettings node and silently wiped out any other
-                // fields (e.g. complaintRadiusMeters) that this dialog
-                // doesn't manage. updateChildren() only touches the fields
-                // listed above and leaves everything else in Firebase intact.
                 db.getReference("officeSettings").updateChildren(data)
                     .addOnSuccessListener {
                         officeStartHour = sh; officeStartMinute = sm
                         officeEndHour = eh; officeEndMinute = em
-                        gracePeriodMinutes = grace
-                        preShiftMinutes = preShift
-                        postShiftMinutes = postShift
+                        gracePeriodMinutes = tempGrace
+                        preShiftMinutes = tempPreShift
+                        postShiftMinutes = tempPostShift
                         updateOfficeHoursLabel()
                         loadAttendanceReport()
                     }

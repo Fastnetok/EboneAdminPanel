@@ -102,12 +102,14 @@ class EboneAdminApp : Application() {
                 val doc = snapshot.documents.firstOrNull() ?: return@addOnSuccessListener
                 val customerId = doc.getString("customerId") ?: doc.id
                 val isp = (doc.getString("ispProvider") ?: "EBONE").uppercase()
+                val url = doc.getString("customerUrl") ?: ""
 
                 lastAutoDisableLaunchAt = System.currentTimeMillis()
 
                 val intent = Intent(this, WebViewLoginActivity::class.java).apply {
                     putExtra("selected_isp", isp)
                     putExtra("auto_activate_customer_id", customerId)
+                    putExtra("customer_url", url)
                     putExtra("manual_action", "SUSPEND")
                     putExtra("target_zone", "Okara")
                     if (isp == "EBONE") {

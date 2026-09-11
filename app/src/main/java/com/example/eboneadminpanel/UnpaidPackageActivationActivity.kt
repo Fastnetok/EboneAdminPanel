@@ -383,16 +383,15 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
         selectedReliefDays = days
         isQuickTestPending = false
 
-        val start = Calendar.getInstance()
-        val suspend = start.clone() as Calendar
-        suspend.add(Calendar.DAY_OF_YEAR, days)
+        // Rule: 1 Day = Exactly 24 Hours from now
+        val suspend = Calendar.getInstance().apply {
+            add(Calendar.HOUR_OF_DAY, days * 24)
+        }
 
         selectedSuspendAt = suspend.timeInMillis
 
-        tvStartDate.text =
-            "Start Date: ${dateFormat.format(start.time)}"
-        tvSuspendDate.text =
-            "Suspend Date: ${dateFormat.format(suspend.time)}"
+        tvStartDate.text = "Start Date: ${dateFormat.format(Calendar.getInstance().time)}"
+        tvSuspendDate.text = "Suspend Date: ${dateFormat.format(suspend.time)}"
 
         for (i in 0 until quickDaysContainer.childCount) {
             val checkBox =
@@ -537,23 +536,13 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
                     set(Calendar.YEAR, year)
                     set(Calendar.MONTH, month)
                     set(Calendar.DAY_OF_MONTH, dayOfMonth)
-                    set(Calendar.HOUR_OF_DAY, 23)
-                    set(Calendar.MINUTE, 59)
-                    set(Calendar.SECOND, 59)
-                    set(Calendar.MILLISECOND, 999)
+                    // Rule: Keep the current time to ensure "24 hour multiples"
                 }
 
-                val start = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-
-                if (selected.timeInMillis <= start.timeInMillis) {
+                if (selected.timeInMillis <= System.currentTimeMillis()) {
                     Toast.makeText(
                         this,
-                        "Suspend date must be after today.",
+                        "Suspend date must be in the future.",
                         Toast.LENGTH_SHORT
                     ).show()
                     return@DatePickerDialog
@@ -562,9 +551,9 @@ class UnpaidPackageActivationActivity : AppCompatActivity() {
                 isQuickTestPending = false
                 selectedSuspendAt = selected.timeInMillis
 
-                val diffDays =
-                    ((selected.timeInMillis - start.timeInMillis) /
-                            (24L * 60L * 60L * 1000L)).toInt()
+                val start = Calendar.getInstance()
+                val diffMillis = selected.timeInMillis - start.timeInMillis
+                val diffDays = (diffMillis / (24L * 60L * 60L * 1000L)).toInt()
 
                 selectedReliefDays = diffDays.coerceAtLeast(1)
 

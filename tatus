@@ -1,0 +1,92 @@
+[1mdiff --git a/.idea/deploymentTargetSelector.xml b/.idea/deploymentTargetSelector.xml[m
+[1mindex 82b5796..ca16a99 100644[m
+[1m--- a/.idea/deploymentTargetSelector.xml[m
+[1m+++ b/.idea/deploymentTargetSelector.xml[m
+[36m@@ -6,18 +6,6 @@[m
+         <option name="selectionMode" value="DROPDOWN" />[m
+         <DialogSelection />[m
+       </SelectionState>[m
+[31m-      <SelectionState runConfigName="unitTest">[m
+[31m-        <option name="selectionMode" value="DROPDOWN" />[m
+[31m-        <DialogSelection />[m
+[31m-      </SelectionState>[m
+[31m-      <SelectionState runConfigName="main">[m
+[31m-        <option name="selectionMode" value="DROPDOWN" />[m
+[31m-        <DialogSelection />[m
+[31m-      </SelectionState>[m
+[31m-      <SelectionState runConfigName="androidTest">[m
+[31m-        <option name="selectionMode" value="DROPDOWN" />[m
+[31m-        <DialogSelection />[m
+[31m-      </SelectionState>[m
+     </selectionStates>[m
+   </component>[m
+ </project>[m
+\ No newline at end of file[m
+[1mdiff --git a/.idea/inspectionProfiles/Project_Default.xml b/.idea/inspectionProfiles/Project_Default.xml[m
+[1mdeleted file mode 100644[m
+[1mindex 7061a0d..0000000[m
+[1m--- a/.idea/inspectionProfiles/Project_Default.xml[m
+[1m+++ /dev/null[m
+[36m@@ -1,61 +0,0 @@[m
+[31m-<component name="InspectionProjectProfileManager">[m
+[31m-  <profile version="1.0">[m
+[31m-    <option name="myName" value="Project Default" />[m
+[31m-    <inspection_tool class="ComposePreviewDimensionRespectsLimit" enabled="true" level="WARNING" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="ComposePreviewMustBeTopLevelFunction" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="ComposePreviewNeedsComposableAnnotation" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="ComposePreviewNotSupportedInUnitTestFiles" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="GlancePreviewDimensionRespectsLimit" enabled="true" level="WARNING" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="GlancePreviewMustBeTopLevelFunction" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="GlancePreviewNeedsComposableAnnotation" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="GlancePreviewNotSupportedInUnitTestFiles" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewAnnotationInFunctionWithParameters" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewApiLevelMustBeValid" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewDeviceShouldUseNewSpec" enabled="true" level="WEAK WARNING" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewFontScaleMustBeGreaterThanZero" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewMultipleParameterProviders" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewParameterProviderOnFirstParameter" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-    <inspection_tool class="PreviewPickerAnnotation" enabled="true" level="ERROR" enabled_by_default="true">[m
+[31m-      <option name="composableFile" value="true" />[m
+[31m-      <option name="previewFile" value="true" />[m
+[31m-    </inspection_tool>[m
+[31m-  </profile>[m
+[31m-</component>[m
+\ No newline at end of file[m

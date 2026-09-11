@@ -267,24 +267,45 @@ class OfficeTimmingsActivity : AppCompatActivity() {
             setPadding(px(16,dp), px(12,dp), px(16,dp), px(12,dp))
         }
 
-        // Quick select buttons
+        // Horizontal scroll for quick select buttons
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(24,dp), px(8,dp), px(24,dp), px(8,dp)) }
         layout.addView(et)
-        val quickRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            layoutParams = llp().also { it.topMargin = px(8,dp) }
+
+        val hsv = HorizontalScrollView(this).apply {
+            layoutParams = llp().also { it.topMargin = px(12,dp) }
+            isHorizontalScrollBarEnabled = false
         }
-        listOf(15, 30, 45, 60, 90).forEach { mins ->
+        val quickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        }
+        
+        // Time options: 15m, 30m, 45m, 1h, 2h, 3h, 4h, 5h
+        val options = listOf(
+            15 to "15m", 30 to "30m", 45 to "45m", 
+            60 to "1h", 120 to "2h", 180 to "3h", 
+            240 to "4h", 300 to "5h"
+        )
+        
+        options.forEach { (mins, label) ->
             Button(this).apply {
-                text = "${mins}m"; textSize = 11f
+                text = label; textSize = 11f
                 setTextColor(Color.parseColor("#1565C0"))
-                background = GradientDrawable().apply { shape = GradientDrawable.RECTANGLE; cornerRadius = 8f*(resources.displayMetrics.density); setColor(Color.parseColor("#E3F2FD")) }
-                setPadding(px(8,dp), px(4,dp), px(8,dp), px(4,dp))
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also { it.marginEnd = px(4,dp) }
+                background = GradientDrawable().apply { 
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 8f * dp
+                    setColor(Color.parseColor("#E3F2FD")) 
+                }
+                setPadding(px(12,dp), px(6,dp), px(12,dp), px(6,dp))
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 
+                    px(36,dp)
+                ).also { it.marginEnd = px(8,dp) }
+                layoutParams = lp
                 setOnClickListener { et.setText("$mins") }
             }.also { quickRow.addView(it) }
         }
-        layout.addView(quickRow)
+        hsv.addView(quickRow)
+        layout.addView(hsv)
 
         AlertDialog.Builder(this).setTitle(title).setView(layout)
             .setPositiveButton("OK") { _, _ ->

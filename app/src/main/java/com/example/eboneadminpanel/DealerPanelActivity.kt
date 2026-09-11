@@ -1185,7 +1185,7 @@ class DealerPanelActivity : AppCompatActivity() {
             // Zong-Renala).
             layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "$label Franchise"
+                text = "$label\nFranchise"
                 textSize = 10f
                 setTextColor(accent)
                 setTypeface(null, android.graphics.Typeface.BOLD)

@@ -28,6 +28,7 @@ import com.google.firebase.database.*
 
 class MainActivity : AppCompatActivity(),
     OnMapReadyCallback {
+    // Permission test: Small harmless change.
 
     // NEW: requests RECEIVE_SMS + READ_SMS + POST_NOTIFICATIONS at runtime
     // together — declaring them in the manifest alone is not enough.
@@ -68,6 +69,9 @@ class MainActivity : AppCompatActivity(),
     private lateinit var inProgressText: TextView
     private lateinit var resolvedText: TextView
 
+    private var newConnectionBadge: android.view.View? = null
+    private var centerBadgeCountText: TextView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -100,6 +104,16 @@ class MainActivity : AppCompatActivity(),
         // Billing directly.
         findViewById<TextView>(R.id.activeCustomersButton).setOnClickListener {
             startActivity(Intent(this, CustomerBillingActivity::class.java))
+        }
+
+        // NEW: "Complaint" shortcut — opens AddComplaintActivity directly
+        findViewById<TextView>(R.id.shortcutComplaintButton).setOnClickListener {
+            startActivity(Intent(this, AddComplaintActivity::class.java))
+        }
+
+        // NEW: Permanent "NEW" shortcut button
+        findViewById<TextView>(R.id.shortcutNewConnButton).setOnClickListener {
+            startActivity(Intent(this, NewConnectionDashboardActivity::class.java))
         }
 
         findViewById<TextView>(R.id.menuButton)
@@ -197,6 +211,36 @@ class MainActivity : AppCompatActivity(),
         mapFragment.getMapAsync(this)
 
         loadDashboardCounters()
+        setupNewConnectionBadge()
+    }
+
+    private fun setupNewConnectionBadge() {
+        newConnectionBadge = findViewById(R.id.newConnectionBadge)
+        centerBadgeCountText = findViewById(R.id.centerBadgeCountText)
+        val shortcutNewBtn = findViewById<TextView>(R.id.shortcutNewConnButton)
+
+        newConnectionBadge?.setOnClickListener {
+            val intent = Intent(this, NewConnectionDashboardActivity::class.java)
+            startActivity(intent)
+        }
+
+        FirebaseDatabase.getInstance().getReference("officeSettings/new_connections/pending")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val count = snapshot.childrenCount.toInt()
+                    
+                    if (count > 0) {
+                        centerBadgeCountText?.text = count.toString()
+                        newConnectionBadge?.visibility = android.view.View.VISIBLE
+                    } else {
+                        newConnectionBadge?.visibility = android.view.View.GONE
+                    }
+
+                    // Always update shortcut button text
+                    shortcutNewBtn?.text = "NEW ($count)"
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
     }
 
     override fun onMapReady(

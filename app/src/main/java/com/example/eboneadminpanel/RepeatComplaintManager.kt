@@ -38,24 +38,17 @@ class RepeatComplaintManager {
                 var lastResolvedTime = 0L
 
                 for (item in snapshot.children) {
+                    val complaint = item.getValue(Complaint::class.java) ?: continue
 
-                    val complaint =
-                        item.getValue(
-                            Complaint::class.java
-                        ) ?: continue
+                    // Ignore complaints resolved by the System/Auto-Monitor during testing
+                    val isSystem = item.child("is_system_resolved").getValue(Boolean::class.java) ?: false
+                    if (isSystem) continue
 
                     repeatCount++
 
-                    if (
-                        complaint.resolvedTime >
-                        lastResolvedTime
-                    ) {
-
-                        lastResolvedTime =
-                            complaint.resolvedTime
-
-                        lastResolver =
-                            complaint.resolvedBy
+                    if (complaint.resolvedTime > lastResolvedTime) {
+                        lastResolvedTime = complaint.resolvedTime
+                        lastResolver = complaint.resolvedBy
                     }
                 }
 

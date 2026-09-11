@@ -22,7 +22,10 @@ class AppVersionActivity : AppCompatActivity() {
     private lateinit var tvUpToDate: TextView
     private lateinit var tvOutdated: TextView
     private lateinit var tvNeverOpened: TextView
+    private lateinit var tvListHeader: TextView
     private var latestVersion = ""
+    private var currentFilter = "ALL"
+    private var cachedDevicesSnap: DataSnapshot? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,20 +108,33 @@ class AppVersionActivity : AppCompatActivity() {
 
         statsRow.addView(miniStatBox(tvUpToDate, "Up to Date ✅", "#E8F5E9", "#A5D6A7", dp).also {
             it.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { m -> m.marginEnd = px(6,dp) }
+            it.setOnClickListener { 
+                currentFilter = if (currentFilter == "UP_TO_DATE") "ALL" else "UP_TO_DATE"
+                renderFilteredList() 
+            }
         })
         statsRow.addView(miniStatBox(tvOutdated, "Outdated ⚠️", "#FFEBEE", "#FFCDD2", dp).also {
             it.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { m -> m.marginEnd = px(6,dp) }
+            it.setOnClickListener { 
+                currentFilter = if (currentFilter == "OUTDATED") "ALL" else "OUTDATED"
+                renderFilteredList() 
+            }
         })
         statsRow.addView(miniStatBox(tvNeverOpened, "Never ❓", "#F5F5F5", "#E0E0E0", dp).also {
             it.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            it.setOnClickListener { 
+                currentFilter = if (currentFilter == "NEVER") "ALL" else "NEVER"
+                renderFilteredList() 
+            }
         })
         content.addView(statsRow)
 
         // Employee List Card
         val listCard = card(dp)
-        listCard.addView(tv("Employee Version Details", 14f, Color.parseColor("#111111"), bold = true).also {
+        tvListHeader = tv("Employee Version Details", 14f, Color.parseColor("#111111"), bold = true).also {
             it.layoutParams = llp().also { m -> m.bottomMargin = px(8,dp) }
-        })
+        }
+        listCard.addView(tvListHeader)
         listCard.addView(View(this).apply {
             setBackgroundColor(Color.parseColor("#EEEEEE"))
             layoutParams = llp().also { it.height = 1; it.bottomMargin = px(4,dp) }
@@ -143,82 +159,116 @@ class AppVersionActivity : AppCompatActivity() {
     }
 
     private fun loadEmployeeVersions() {
-        val dp = resources.displayMetrics.density
         db.getReference("ApprovedDevices").get()
             .addOnSuccessListener { snap ->
-                listContainer.removeAllViews()
+                cachedDevicesSnap = snap
+                
+                // First pass: count stats
                 var upToDate = 0; var outdated = 0; var never = 0
-                var rowCount = 0
-
                 for (device in snap.children) {
-                    val empName = device.child("employeeName").value?.toString() ?: continue
                     val appVersion = device.child("appVersion").value?.toString() ?: ""
-                    val lastSeen = (device.child("lastVersionUpdate").value as? Long) ?: 0L
-
                     val isLatest = latestVersion.isNotEmpty() && appVersion == latestVersion
                     val hasVersion = appVersion.isNotEmpty()
-
                     when {
                         !hasVersion -> never++
                         isLatest -> upToDate++
                         else -> outdated++
                     }
-
-                    rowCount++
-                    val row = LinearLayout(this).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.CENTER_VERTICAL
-                        setBackgroundColor(if (rowCount % 2 == 0) Color.parseColor("#FAFAFA") else Color.WHITE)
-                        setPadding(0, px(12,dp), 0, px(12,dp))
-                    }
-
-                    val infoBlock = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    }
-                    infoBlock.addView(tv(empName, 14f, Color.parseColor("#111111"), bold = true))
-
-                    val versionText = if (hasVersion) "v$appVersion" else "Never opened app"
-                    val versionColor = when {
-                        !hasVersion -> Color.parseColor("#9E9E9E")
-                        isLatest -> Color.parseColor("#2E7D32")
-                        else -> Color.parseColor("#E65100")
-                    }
-                    infoBlock.addView(tv(versionText, 12f, versionColor).also {
-                        it.layoutParams = llp().also { m -> m.topMargin = px(2,dp) }
-                    })
-
-                    if (lastSeen > 0) {
-                        val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(lastSeen))
-                        infoBlock.addView(tv("Updated: $dateStr", 10f, Color.parseColor("#9E9E9E")).also {
-                            it.layoutParams = llp().also { m -> m.topMargin = px(1,dp) }
-                        })
-                    }
-
-                    val badgeText: String; val badgeColor: Int; val badgeBg: Int
-                    when {
-                        !hasVersion -> { badgeText = "❓"; badgeColor = Color.parseColor("#9E9E9E"); badgeBg = Color.parseColor("#F5F5F5") }
-                        isLatest -> { badgeText = "✅ Latest"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
-                        else -> { badgeText = "⚠️ Update"; badgeColor = Color.parseColor("#E65100"); badgeBg = Color.parseColor("#FFF3E0") }
-                    }
-                    row.addView(infoBlock)
-                    row.addView(tv(badgeText, 10f, badgeColor, bold = true).also {
-                        it.background = GradientDrawable().apply {
-                            shape = GradientDrawable.RECTANGLE; cornerRadius = 10f*(resources.displayMetrics.density); setColor(badgeBg)
-                        }
-                        it.setPadding(px(8,dp), px(3,dp), px(8,dp), px(3,dp))
-                    })
-                    listContainer.addView(row)
-                    listContainer.addView(View(this).apply {
-                        setBackgroundColor(Color.parseColor("#EEEEEE"))
-                        layoutParams = llp().also { it.height = 1 }
-                    })
                 }
-
                 tvUpToDate.text = "$upToDate"
                 tvOutdated.text = "$outdated"
                 tvNeverOpened.text = "$never"
+                
+                renderFilteredList()
             }
+    }
+
+    private fun renderFilteredList() {
+        val snap = cachedDevicesSnap ?: return
+        val dp = resources.displayMetrics.density
+        listContainer.removeAllViews()
+        
+        tvListHeader.text = when(currentFilter) {
+            "UP_TO_DATE" -> "Up to Date Employees"
+            "OUTDATED" -> "Outdated Employees"
+            "NEVER" -> "Never Opened Employees"
+            else -> "Employee Version Details"
+        }
+        
+        var rowCount = 0
+        for (device in snap.children) {
+            val empName = device.child("employeeName").value?.toString() ?: continue
+            val appVersion = device.child("appVersion").value?.toString() ?: ""
+            val lastSeen = (device.child("lastVersionUpdate").value as? Long) ?: 0L
+
+            val isLatest = latestVersion.isNotEmpty() && appVersion == latestVersion
+            val hasVersion = appVersion.isNotEmpty()
+
+            val category = when {
+                !hasVersion -> "NEVER"
+                isLatest -> "UP_TO_DATE"
+                else -> "OUTDATED"
+            }
+            
+            if (currentFilter != "ALL" && currentFilter != category) continue
+
+            rowCount++
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(if (rowCount % 2 == 0) Color.parseColor("#FAFAFA") else Color.WHITE)
+                setPadding(0, px(12,dp), 0, px(12,dp))
+            }
+
+            val infoBlock = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            infoBlock.addView(tv(empName, 14f, Color.parseColor("#111111"), bold = true))
+
+            val versionText = if (hasVersion) "v$appVersion" else "Never opened app"
+            val versionColor = when {
+                !hasVersion -> Color.parseColor("#9E9E9E")
+                isLatest -> Color.parseColor("#2E7D32")
+                else -> Color.parseColor("#E65100")
+            }
+            infoBlock.addView(tv(versionText, 12f, versionColor).also {
+                it.layoutParams = llp().also { m -> m.topMargin = px(2,dp) }
+            })
+
+            if (lastSeen > 0) {
+                val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(lastSeen))
+                infoBlock.addView(tv("Updated: $dateStr", 10f, Color.parseColor("#9E9E9E")).also {
+                    it.layoutParams = llp().also { m -> m.topMargin = px(1,dp) }
+                })
+            }
+
+            val badgeText: String; val badgeColor: Int; val badgeBg: Int
+            when {
+                !hasVersion -> { badgeText = "❓"; badgeColor = Color.parseColor("#9E9E9E"); badgeBg = Color.parseColor("#F5F5F5") }
+                isLatest -> { badgeText = "✅ Latest"; badgeColor = Color.parseColor("#2E7D32"); badgeBg = Color.parseColor("#E8F5E9") }
+                else -> { badgeText = "⚠️ Update"; badgeColor = Color.parseColor("#E65100"); badgeBg = Color.parseColor("#FFF3E0") }
+            }
+            row.addView(infoBlock)
+            row.addView(tv(badgeText, 10f, badgeColor, bold = true).also {
+                it.background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE; cornerRadius = 10f*(resources.displayMetrics.density); setColor(badgeBg)
+                }
+                it.setPadding(px(8,dp), px(3,dp), px(8,dp), px(3,dp))
+            })
+            listContainer.addView(row)
+            listContainer.addView(View(this).apply {
+                setBackgroundColor(Color.parseColor("#EEEEEE"))
+                layoutParams = llp().also { it.height = 1 }
+            })
+        }
+        
+        if (rowCount == 0) {
+            listContainer.addView(tv("No employees in this category.", 13f, Color.parseColor("#9E9E9E")).also {
+                it.gravity = Gravity.CENTER
+                it.setPadding(0, px(20,dp), 0, px(20,dp))
+            })
+        }
     }
 
     private fun showSetVersionDialog() {

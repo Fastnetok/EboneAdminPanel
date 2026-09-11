@@ -43,76 +43,139 @@
 
     </LinearLayout>
 
-    <LinearLayout
+    <!-- === CHAARON CARDS KA GRID + EK HI BADGE CIRCLE DARMIYAN MEIN === -->
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingTop="15dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp">
+        android:layout_height="wrap_content">
 
-        <TextView
-            android:id="@+id/totalComplaintText"
-            android:layout_width="0dp"
-            android:layout_height="95dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:background="#2962FF"
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- ROW 1: TOTAL + PENDING -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="15dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/totalComplaintText"
+                    android:layout_width="0dp"
+                    android:layout_height="95dp"
+                    android:layout_weight="1"
+                    android:layout_margin="4dp"
+                    android:background="#2962FF"
+                    android:gravity="center"
+                    android:text=""
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/pendingComplaintText"
+                    android:layout_width="0dp"
+                    android:layout_height="95dp"
+                    android:layout_weight="1"
+                    android:layout_margin="4dp"
+                    android:background="#E53935"
+                    android:gravity="center"
+                    android:text=""
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            <!-- ROW 2: IN PROGRESS + RESOLVED -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/inProgressText"
+                    android:layout_width="0dp"
+                    android:layout_height="95dp"
+                    android:layout_weight="1"
+                    android:layout_margin="4dp"
+                    android:background="#FB8C00"
+                    android:gravity="center"
+                    android:text=""
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/resolvedText"
+                    android:layout_width="0dp"
+                    android:layout_height="95dp"
+                    android:layout_weight="1"
+                    android:layout_margin="4dp"
+                    android:background="#43A047"
+                    android:gravity="center"
+                    android:text=""
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- EK HI 12mm BADGE CIRCLE — CHAARON CARDS KE BEECH DARMIYAN MEIN -->
+        <LinearLayout
+            android:id="@+id/newConnectionBadge"
+            android:layout_width="12mm"
+            android:layout_height="12mm"
+            android:layout_gravity="center"
+            android:orientation="vertical"
             android:gravity="center"
-            android:text=""
-            android:textColor="#FFFFFF"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:background="@drawable/bg_stat_badge_circle"
+            android:visibility="gone">
 
-        <TextView
-            android:id="@+id/pendingComplaintText"
-            android:layout_width="0dp"
-            android:layout_height="95dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:background="#E53935"
-            android:gravity="center"
-            android:text=""
-            android:textColor="#FFFFFF"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center|bottom"
+                android:includeFontPadding="false"
+                android:text="NEW"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="8sp"
+                android:autoSizeMaxTextSize="16sp"
+                android:autoSizeStepGranularity="1sp"
+                android:maxLines="1" />
 
-    </LinearLayout>
+            <View
+                android:layout_width="8mm"
+                android:layout_height="0.4mm"
+                android:background="#FFFFFF" />
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp">
+            <TextView
+                android:id="@+id/centerBadgeCountText"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center|top"
+                android:includeFontPadding="false"
+                android:text="1"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/inProgressText"
-            android:layout_width="0dp"
-            android:layout_height="95dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:background="#FB8C00"
-            android:gravity="center"
-            android:text=""
-            android:textColor="#FFFFFF"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+        </LinearLayout>
 
-        <TextView
-            android:id="@+id/resolvedText"
-            android:layout_width="0dp"
-            android:layout_height="95dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:background="#43A047"
-            android:gravity="center"
-            android:text=""
-            android:textColor="#FFFFFF"
-            android:textSize="17sp"
-            android:textStyle="bold" />
-
-    </LinearLayout>
+    </FrameLayout>
+    <!-- === CARDS + BADGE BLOCK KHATAM === -->
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -151,15 +214,6 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Dealer" />
 
-        <!--
-            FIX: rebuilt as a SINGLE TextView with drawableTop, using the
-            EXACT SAME width/height/padding/gravity/textSize/textStyle as
-            the Dealer TextView right above it — that structural mismatch
-            (Dealer = one TextView, old Active = LinearLayout + separate
-            ImageView + TextView) is exactly why no amount of padding
-            tweaking could ever make them align. Same view type + same
-            properties now guarantees the same vertical alignment.
-        -->
         <TextView
             android:id="@+id/activeCustomersButton"
             android:layout_width="58dp"
@@ -178,6 +232,45 @@
             android:drawablePadding="0dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Active" />
+
+        <TextView
+            android:id="@+id/shortcutComplaintButton"
+            android:layout_width="58dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:gravity="center"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:text="Complaint"
+            android:textColor="#E53935"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:drawableTop="@drawable/ic_users"
+            android:drawableTint="#E53935"
+            android:drawablePadding="0dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Complaint" />
+
+        <TextView
+            android:id="@+id/shortcutNewConnButton"
+            android:layout_width="58dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:gravity="center"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:text="NEW (0)"
+            android:textColor="#1565C0"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:drawableTop="@drawable/ic_new_connection"
+            android:drawablePadding="0dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="New Connection" />
 
     </LinearLayout>
 

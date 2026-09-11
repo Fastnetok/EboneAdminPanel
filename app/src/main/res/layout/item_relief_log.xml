@@ -72,15 +72,6 @@
             android:textSize="12.5sp" />
 
         <TextView
-            android:id="@+id/tvLogExpiryAt"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Expected Expiry: —"
-            android:textColor="#5F6B7A"
-            android:textSize="12.5sp" />
-
-        <TextView
             android:id="@+id/tvLogDeactivatedAt"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -88,6 +79,17 @@
             android:text="Deactivated: —"
             android:textColor="#5F6B7A"
             android:textSize="12.5sp" />
+
+        <TextView
+            android:id="@+id/tvLogCountdown"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="00h 00m left"
+            android:textColor="#C62828"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
     </LinearLayout>
 
