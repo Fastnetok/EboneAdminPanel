@@ -2,8 +2,11 @@ package com.example.eboneadminpanel
 
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -48,6 +51,10 @@ class DealerPanelActivity : AppCompatActivity() {
     // the 💰 Check Balance action successfully reads the Ebone panel.
     private var franchiseBalancesListener: ListenerRegistration? = null
     private lateinit var franchiseBalancesRow: LinearLayout
+
+    private val REQUEST_CHECK_BALANCE = 7002
+    private val autoUpdateQueue = mutableListOf<Pair<String, String>>()
+    private var isAutoUpdating = false
 
     private val paymentAccountNames = listOf(
         "EasyPaisa", "JazzCash", "SadaPay", "Raast ID",
@@ -1099,6 +1106,13 @@ class DealerPanelActivity : AppCompatActivity() {
                 Toast.makeText(this, "Could not find that dealer on Wateen", Toast.LENGTH_LONG).show()
             }
             pendingFetchIdInput = null
+        } else if (requestCode == REQUEST_CHECK_BALANCE) {
+            if (isAutoUpdating) {
+                // Short delay to let the UI settle/Firestore update reflect
+                Handler(Looper.getMainLooper()).postDelayed({
+                    processNextAutoUpdate()
+                }, 1200)
+            }
         }
     }
 
@@ -1139,7 +1153,36 @@ class DealerPanelActivity : AppCompatActivity() {
             putExtra("manual_action", "CHECK_BALANCE")
             putExtra("target_zone", zone)
         }
-        startActivity(intent)
+        if (isAutoUpdating) {
+            startActivityForResult(intent, REQUEST_CHECK_BALANCE)
+        } else {
+            startActivity(intent)
+        }
+    }
+
+    private fun startAutoUpdate() {
+        if (isAutoUpdating) return
+        
+        autoUpdateQueue.clear()
+        autoUpdateQueue.add("EBONE" to "Okara")
+        autoUpdateQueue.add("WATEEN" to "Okara")
+        autoUpdateQueue.add("ZONG" to "Okara")
+        autoUpdateQueue.add("ZONG" to "Renala")
+        
+        isAutoUpdating = true
+        Toast.makeText(this, "Starting Auto Update for all panels...", Toast.LENGTH_SHORT).show()
+        processNextAutoUpdate()
+    }
+
+    private fun processNextAutoUpdate() {
+        if (autoUpdateQueue.isEmpty()) {
+            isAutoUpdating = false
+            Toast.makeText(this, "Auto Update completed!", Toast.LENGTH_LONG).show()
+            return
+        }
+        
+        val next = autoUpdateQueue.removeAt(0)
+        launchCheckBalance(next.first, next.second)
     }
 
     /** NEW: live display of franchise-level balances (separate from any
@@ -1169,6 +1212,9 @@ class DealerPanelActivity : AppCompatActivity() {
                 if (zongRenala != null) {
                     franchiseBalancesRow.addView(franchiseBalanceChip("Zong (Renala)", zongRenala, Color.parseColor("#7C3AED")))
                 }
+                
+                // NEW: Auto Update button at the end of the scrollable row
+                franchiseBalancesRow.addView(autoUpdateChip())
             }
     }
 
@@ -1194,8 +1240,28 @@ class DealerPanelActivity : AppCompatActivity() {
                 text = if (value == null) "Not checked yet" else "Rs. ${"%,.0f".format(kotlin.math.abs(value))}"
                 textSize = 13f
                 setTextColor(textDark)
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
             })
+        }
+
+    private fun autoUpdateChip(): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = outlinedPill(Color.parseColor("#EEF2FF"), Color.parseColor("#4F46E5"), 10)
+            layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = "⚡"
+                textSize = 18f
+            })
+            addView(TextView(this@DealerPanelActivity).apply {
+                text = "Auto Update"
+                textSize = 11f
+                setTextColor(Color.parseColor("#4F46E5"))
+                setTypeface(null, Typeface.BOLD)
+            })
+            setOnClickListener { startAutoUpdate() }
         }
 
     /** NEW: admin-configurable low-balance notification thresholds, one

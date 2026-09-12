@@ -406,7 +406,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
         if (!ispUsername.isNullOrEmpty()) {
             val savedCookie = getIspSessionCookie(selectedIsp)
-            // FIX: Don't aggressively clear cookies at the start. 
+            // FIX: Don't aggressively clear cookies at the start.
             // This allows the browser to keep the "mazboot" session alive.
 
             if (savedCookie.isNotEmpty()) {
@@ -721,7 +721,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                 } else if (manualAction == "CHECK_BALANCE") {
                     if (!eboneBalanceCheckAttempted) {
                         eboneBalanceCheckAttempted = true
-                        webView.postDelayed({ readEboneFranchiseBalance() }, 300)
+                        webView.postDelayed({ readEboneFranchiseBalance() }, 1000)
                     }
                 } else if (!url.contains("/clients")) {
                     webView.postDelayed({ webView.loadUrl("https://partner.ebill.pk/clients") }, 300)
@@ -1483,9 +1483,9 @@ class WebViewLoginActivity : AppCompatActivity() {
             return
         }
 
-        if (eboneTopupSubmitAttempt >= 8) {
+        if (eboneTopupSubmitAttempt >= 3) {
             finishManualActionFailure(
-                "Ebone payment form did not become ready for Submit after 8 checks. No success was recorded."
+                "Ebone payment form did not become ready for Submit after 3 checks. No success was recorded."
             )
             return
         }
@@ -1553,7 +1553,7 @@ class WebViewLoginActivity : AppCompatActivity() {
     private fun verifyEboneDealerTopupResult(amount: String, attempt: Int) {
         if (eboneTopupSuccessConfirmed) return
 
-        if (attempt >= 10) {
+        if (attempt >= 3) {
             finishManualActionFailure(
                 "Ebone Submit was clicked, but the panel did not confirm the payment. No success was recorded."
             )
@@ -1597,7 +1597,7 @@ class WebViewLoginActivity : AppCompatActivity() {
 
                 android.util.Log.d(
                     "WebViewLoginActivity",
-                    "Ebone dealer top-up verify ${attempt + 1}/10: success=$success error=$error away=$awayFromAddBalance form=$formVisible button=$buttonReady page=$clean"
+                    "Ebone dealer top-up verify ${attempt + 1}/3: success=$success error=$error away=$awayFromAddBalance form=$formVisible button=$buttonReady page=$clean"
                 )
 
                 if (success) {
@@ -1606,7 +1606,7 @@ class WebViewLoginActivity : AppCompatActivity() {
                     return@evaluateJavascript
                 }
 
-                if (attempt + 1 < 10 && !error) {
+                if (attempt + 1 < 3 && !error) {
                     webView.postDelayed({ verifyEboneDealerTopupResult(amount, attempt + 1) }, 850)
                     return@evaluateJavascript
                 }
@@ -1778,14 +1778,14 @@ class WebViewLoginActivity : AppCompatActivity() {
                     "  if (text && text.indexOf('Balance') > -1) {" +
                     "    return JSON.stringify({text:text, clicked:false});" +
                     "  }" +
-                    "  var icon = document.querySelector('i.fa-dollar');" +
+                    "  var icon = document.querySelector('i.fa-dollar') || document.querySelector('.fa-dollar');" +
                     "  var link = icon ? icon.closest('a') : null;" +
                     "  if (link) { link.click(); }" +
                     "  return JSON.stringify({text:'', clicked: !!link});" +
                     "})()"
         ) { resultRaw ->
             try {
-                val clean = resultRaw
+                val clean = (resultRaw ?: "")
                     .removeSurrounding("\"")
                     .replace("\\\"", "\"")
                     .replace("\\n", " ")
@@ -1796,25 +1796,28 @@ class WebViewLoginActivity : AppCompatActivity() {
 
                 if (text.isNotBlank()) {
                     val balanceMatch = Regex("Balance:\\s*(-?[0-9.,]+)").find(text)
-                    val balance = balanceMatch?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+                    val balanceStr = balanceMatch?.groupValues?.get(1)?.replace(",", "")
+                    val balance = balanceStr?.toDoubleOrNull()
                     if (balance != null) {
                         FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { _ ->
                             FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone)
                         }
                         setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
-                        finish()
+                        // Give it a tiny bit of time to show the result if needed, but finish for automation
+                        webView.postDelayed({ finish() }, 500)
                         return@evaluateJavascript
                     }
                 }
 
-                if (clicked && attempt < 3) {
-                    webView.postDelayed({ readEboneFranchiseBalance(attempt + 1) }, 700)
+                if (attempt < 10) {
+                    val delay = if (clicked) 1000L else 1500L
+                    webView.postDelayed({ readEboneFranchiseBalance(attempt + 1) }, delay)
                 } else {
-                    finishManualActionFailure("Could not read the franchise balance dropdown on Ebone")
+                    finishManualActionFailure("Could not read the franchise balance dropdown on Ebone after $attempt attempts")
                 }
             } catch (e: Exception) {
-                if (attempt < 3) {
-                    webView.postDelayed({ readEboneFranchiseBalance(attempt + 1) }, 700)
+                if (attempt < 10) {
+                    webView.postDelayed({ readEboneFranchiseBalance(attempt + 1) }, 1000)
                 } else {
                     finishManualActionFailure("Could not read the franchise balance dropdown: ${e.message}")
                 }

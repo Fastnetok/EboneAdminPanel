@@ -10,7 +10,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.database.FirebaseDatabase
-import java.util.Date
 
 class NewConnectionIntakeAdapter(
     private val list: List<NewConnection>,
@@ -28,7 +27,7 @@ class NewConnectionIntakeAdapter(
         val btnMove: Button = v.findViewById(R.id.btnMove)
         val btnAssign: Button = v.findViewById(R.id.btnAssign)
         val btnInstall: Button = v.findViewById(R.id.btnInstall)
-        
+
         val seenStatus: android.widget.ImageView = v.findViewById(R.id.ivSeenStatus)
         val seenTime: TextView = v.findViewById(R.id.tvSeenTime)
         val createdTime: TextView = v.findViewById(R.id.tvCreatedTime)
@@ -43,7 +42,6 @@ class NewConnectionIntakeAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = list[position]
         val context = holder.itemView.context
-        val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
         val fullFormat = java.text.SimpleDateFormat("dd MMM / h:mm a", java.util.Locale.getDefault())
 
         holder.name.text = item.customerName
@@ -73,10 +71,10 @@ class NewConnectionIntakeAdapter(
                         "phoneNumber" to etPhone.text.toString().trim(),
                         "comments" to etComm.text.toString().trim()
                     )
-                    
+
                     // Root path is officeSettings/new_connections
                     val fbRoot = FirebaseDatabase.getInstance().getReference("officeSettings/new_connections")
-                    
+
                     if (item.assignedTo.isEmpty()) {
                         fbRoot.child("pending").child(item.id).updateChildren(updates)
                     } else {
@@ -105,15 +103,19 @@ class NewConnectionIntakeAdapter(
 
         holder.btnAssign.setOnClickListener { onAssign(item) }
 
-        // WhatsApp Style Seen Status (Ticks) at the bottom
+        // NOTE: the Seen/Double-tick indicator is intentionally NOT shown
+        // on this screen (Pending list / Total employee drill-down).
+        // The tick is only meaningful on the Progress screen
+        // (NewConnectionProgressAdapter) — showing it here as well was
+        // confusing, since this list mixes unassigned, assigned, and
+        // completed items for entirely different purposes.
+        holder.seenStatus.visibility = View.GONE
+        holder.seenTime.visibility = View.GONE
+
         if (item.status == "Completed") {
             holder.assignedToText.text = "Installed By: ${item.assignedTo}"
             holder.assignedToText.visibility = View.VISIBLE
-            holder.seenStatus.visibility = View.VISIBLE
-            holder.seenStatus.setImageResource(R.drawable.ic_double_tick)
-            holder.seenTime.text = timeFormat.format(Date(item.completionTime))
-            holder.seenTime.visibility = View.VISIBLE
-            
+
             holder.btnAssign.visibility = View.GONE
             holder.btnMove.visibility = View.GONE
             holder.btnInstall.visibility = View.GONE
@@ -121,25 +123,13 @@ class NewConnectionIntakeAdapter(
         } else if (item.assignedTo.isNotEmpty()) {
             holder.assignedToText.text = "Sent: ${item.assignedTo}"
             holder.assignedToText.visibility = View.VISIBLE
-            holder.seenStatus.visibility = View.VISIBLE
-            
-            if (item.seenByEmployee) {
-                holder.seenStatus.setImageResource(R.drawable.ic_double_tick)
-                holder.seenTime.text = timeFormat.format(java.util.Date(item.seenTime))
-                holder.seenTime.visibility = View.VISIBLE
-            } else {
-                holder.seenStatus.setImageResource(R.drawable.ic_single_tick)
-                holder.seenTime.visibility = View.GONE
-            }
-            
+
             holder.btnAssign.visibility = View.GONE
             holder.btnMove.visibility = View.VISIBLE
             holder.btnInstall.visibility = View.VISIBLE
             holder.btnEdit.visibility = View.VISIBLE
         } else {
             holder.assignedToText.visibility = View.GONE
-            holder.seenStatus.visibility = View.GONE
-            holder.seenTime.visibility = View.GONE
             holder.btnAssign.visibility = View.VISIBLE
             holder.btnMove.visibility = View.GONE
             holder.btnInstall.visibility = View.GONE

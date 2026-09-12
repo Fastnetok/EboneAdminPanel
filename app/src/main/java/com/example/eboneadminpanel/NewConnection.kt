@@ -13,5 +13,11 @@ data class NewConnection(
     var seenByEmployee: Boolean = false,
     var seenTime: Long = 0,
     var completionTime: Long = 0,
-    var cancellationReason: String = ""
+    var cancellationReason: String = "",
+    // NEW: was missing here even though it's already written by the
+    // Field Manager app's drag-and-drop reordering (NewConnectionListActivity.kt)
+    // and read by Complaints' equivalent (Complaint.kt already has it).
+    // Needed so NewConnectionProgressActivity.kt can pick each
+    // employee's front-of-queue item correctly.
+    var displayOrder: Long = 0
 )

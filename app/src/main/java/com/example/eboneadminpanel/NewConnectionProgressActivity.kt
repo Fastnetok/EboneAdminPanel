@@ -8,10 +8,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.firebase.database.*
 
 /*
- * Mirrors ProgressActivity (Complaints) exactly: a direct, read-only
- * list — no employee-picker step, no buttons. Shows every connection
- * currently sitting in any employee's gift_box (i.e. still in
- * progress / not yet installed).
+ * FIXED to match Complaints' ProgressActivity.kt exactly: shows ONE row
+ * per employee — specifically that employee's front-of-queue item
+ * (lowest displayOrder among their gift_box items) — not one row per
+ * raw item. Previously this screen flattened every employee's entire
+ * gift_box into individual rows, which disagreed with the Dashboard's
+ * "Progress" count (unique employees) whenever an employee held more
+ * than one item at a time.
  */
 class NewConnectionProgressActivity : AppCompatActivity() {
 
@@ -36,8 +39,10 @@ class NewConnectionProgressActivity : AppCompatActivity() {
     }
 
     /*
-     * Flattens every employee's gift_box into one list — every
-     * connection currently assigned and not yet installed.
+     * SAME RULE AS ProgressActivity.kt (Complaints): for each employee,
+     * pick only the item with the LOWEST displayOrder — the front of
+     * their queue. Everything else they're holding is Pending, not
+     * Progress.
      */
     private fun loadProgressConnections() {
         val db = FirebaseDatabase.getInstance()
@@ -48,11 +53,17 @@ class NewConnectionProgressActivity : AppCompatActivity() {
                 progressList.clear()
 
                 for (employeeNode in snapshot.children) {
+                    var frontOfQueue: NewConnection? = null
+
                     for (child in employeeNode.children) {
-                        child.getValue(NewConnection::class.java)?.let { conn ->
-                            progressList.add(conn)
+                        val connection = child.getValue(NewConnection::class.java) ?: continue
+
+                        if (frontOfQueue == null || connection.displayOrder < frontOfQueue!!.displayOrder) {
+                            frontOfQueue = connection
                         }
                     }
+
+                    frontOfQueue?.let { progressList.add(it) }
                 }
 
                 progressList.sortByDescending { it.assignedTime }

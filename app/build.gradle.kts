@@ -38,8 +38,8 @@ android {
         applicationId = "com.example.eboneadminpanel"
         minSdk = 24
         targetSdk = 36
-        versionCode = 43
-        versionName = "1.0.43"
+        versionCode = 44
+        versionName = "1.0.44"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRenderer"
     }
 

@@ -55,7 +55,7 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
         }
 
         tvPending.setOnClickListener {
-            startActivity(Intent(this, NewConnectionIntakeActivity::class.java))
+            startActivity(Intent(this, NewConnectionPendingSummaryActivity::class.java))
         }
 
         tvProgress.setOnClickListener {
@@ -121,7 +121,7 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
         }
 
         val fb = FirebaseDatabase.getInstance()
-        
+
         // 1. Get ALL employees
         fb.getReference("employees").get().addOnSuccessListener { empSnapshot ->
             val allEmps = mutableListOf<String>()
@@ -160,7 +160,7 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
                                 assignedTime = System.currentTimeMillis(),
                                 createdTime = System.currentTimeMillis()
                             )
-                            
+
                             // Save directly to selected employee's gift box
                             fb.getReference("officeSettings/new_connections/gift_box").child(selectedEmployee).child(ncId).setValue(nc)
                                 .addOnSuccessListener {
@@ -175,18 +175,25 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
     }
 
     /*
-     * SAME FORMULA AS COMPLAINTS (MainActivity.loadDashboardCounters):
+     * CONFIRMED CORRECT — directly matches Complaints' own
+     * PendingSummaryActivity.kt ("pending = total - 1 per employee")
+     * and ProgressActivity.kt (one front-of-queue item per employee):
      *
      *   Progress = number of UNIQUE employees currently holding at
-     *              least 1 connection (gift_box) — not total items.
-     *   Pending  = TotalAllTime - Progress - InstalledAllTime
-     *              (a subtraction, exactly like complaints — NOT a
-     *              direct count of the "pending" node's children).
-     *   Total    = Pending + Progress
+     *              least 1 connection (gift_box) — each employee
+     *              contributes exactly ONE item here: the front of
+     *              their queue.
+     *   Pending  = every OTHER item an employee is holding beyond
+     *              their one front-of-queue item — i.e.
+     *              TotalAllTime - Progress - Installed. This is NOT
+     *              a mismatch with reality: Pending counts items
+     *              still queued behind an employee's active item,
+     *              not a literal "unassigned intake" count.
+     *   Total    = Pending + Progress (an item count).
      *
-     * Because New Connection data is split across 3 separate nodes
+     * New Connection data is split across 3 separate nodes
      * (pending / gift_box / completed) instead of one flat node like
-     * "complaints", TotalAllTime here is rebuilt by adding up all 3
+     * "complaints", so TotalAllTime here is rebuilt by adding up all 3
      * node's item counts.
      */
     private fun loadStats() {
@@ -207,7 +214,9 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
         dbRoot.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
 
-                // A) Items still sitting in the raw intake pool
+                // A) Items still sitting in the raw intake pool — this
+                //    IS the Pending count now (previously computed but
+                //    then discarded in favor of a subtraction).
                 val pendingNodeCount = snapshot.child("pending").childrenCount.toInt()
 
                 // B) gift_box — total items (for TotalAllTime) AND
@@ -226,7 +235,7 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
                 val progressCount = progressEmployees.size
 
                 // C) completed — 3 levels deep: {Year}/{Month}/{Day}/{id}
-                //    completedAllTimeCount -> used in the Pending subtraction
+                //    completedAllTimeCount -> used in TotalAllTime
                 //    installedTodayCount   -> used only for the Installed box display
                 var completedAllTimeCount = 0
                 var installedTodayCount = 0
@@ -246,12 +255,12 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
                     }
                 }
 
-                // D) Rebuild "TotalAllTime" (equivalent of
-                //    snapshot.childrenCount in the complaints version,
-                //    since here it's split across 3 nodes instead of 1)
+                // D) TotalAllTime — an item count, built by adding up all
+                //    3 nodes.
                 val totalAllTime = pendingNodeCount + giftBoxTotalItems + completedAllTimeCount
 
-                // E) SAME subtraction formula as complaints
+                // E) SAME subtraction rule as Complaints (confirmed
+                //    against PendingSummaryActivity.kt).
                 var pendingCount = totalAllTime - progressCount - completedAllTimeCount
                 if (pendingCount < 0) {
                     pendingCount = 0
