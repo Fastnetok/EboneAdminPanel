@@ -212,6 +212,9 @@ class MainActivity : AppCompatActivity(),
 
         loadDashboardCounters()
         setupNewConnectionBadge()
+
+        // NEW: Startup session refresh for all 4 panels
+        StartupSessionManager.startRefresh(this)
     }
 
     private fun setupNewConnectionBadge() {

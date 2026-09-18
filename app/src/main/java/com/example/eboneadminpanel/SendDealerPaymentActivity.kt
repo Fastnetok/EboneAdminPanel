@@ -1,6 +1,8 @@
 package com.example.eboneadminpanel
 
+import android.R
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -103,7 +105,20 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             textSize = 20f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(textDark)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
+        
+        // NEW: Wrench Icon for reports (as requested)
+        headerRow.addView(ImageButton(this).apply {
+            setImageResource(R.drawable.ic_menu_manage)
+            background = null
+            imageTintList = ColorStateList.valueOf(textDark)
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+            setOnClickListener {
+                startActivity(Intent(this@SendDealerPaymentActivity, DealerRechargeReportActivity::class.java))
+            }
+        })
+        
         root.addView(headerRow)
 
         root.addView(TextView(this).apply {

@@ -68,16 +68,28 @@ object BackgroundBalanceUpdater {
 
             // Restore Cookies
             val savedCookie = getIspSessionCookie(context, isp, zone)
+            val domain = when (isp.uppercase()) {
+                "WATEEN" -> "https://panel.wateen.com"
+                "ZONG" -> "https://turbonet.zong.com.pk"
+                else -> "https://partner.ebill.pk"
+            }
+
+            // Isolated cleanup for this domain before poking
+            val cm = CookieManager.getInstance()
+            val existing = cm.getCookie(domain)
+            if (existing != null) {
+                existing.split(";").forEach { part ->
+                    val name = part.trim().substringBefore("=")
+                    if (name.isNotBlank()) cm.setCookie(domain, "$name=; Max-Age=0")
+                }
+                cm.flush()
+            }
+
             if (savedCookie.isNotEmpty()) {
-                val domain = when (isp.uppercase()) {
-                    "WATEEN" -> "https://panel.wateen.com"
-                    "ZONG" -> "https://turbonet.zong.com.pk"
-                    else -> "https://partner.ebill.pk"
-                }
                 savedCookie.split(";").forEach { part ->
-                    CookieManager.getInstance().setCookie(domain, part.trim())
+                    cm.setCookie(domain, part.trim())
                 }
-                CookieManager.getInstance().flush()
+                cm.flush()
             }
 
             webView.webViewClient = object : WebViewClient() {

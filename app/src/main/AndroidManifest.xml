@@ -182,6 +182,7 @@
         <activity android:name=".WateenWebViewActivity" android:exported="false" />
         <activity android:name=".ZongOkaraWebViewActivity" android:exported="false" />
         <activity android:name=".ZongRenalaWebViewActivity" android:exported="false" />
+        <activity android:name=".DealerRechargeReportActivity" android:exported="false" />
 
         <!-- FileProvider for APK install -->
         <provider

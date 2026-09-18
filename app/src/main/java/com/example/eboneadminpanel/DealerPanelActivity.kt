@@ -1057,7 +1057,7 @@ class DealerPanelActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(8), dp(10), dp(8))
             background = outlinedPill(bgColor, strokeColor, 10)
-            layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(dp(125), -2).also { it.marginEnd = dp(8) }
             
             val outValue = TypedValue()
             context.theme.resolveAttribute(R.attr.selectableItemBackground, outValue, true)
@@ -1097,7 +1097,7 @@ class DealerPanelActivity : AppCompatActivity() {
             val borderColor = if (isAutoUpdating) Color.parseColor("#7C3AED") else Color.parseColor("#4F46E5")
             val textColor = if (isAutoUpdating) Color.parseColor("#7C3AED") else Color.parseColor("#4F46E5")
             background = outlinedPill(bgColor, borderColor, 10)
-            layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(dp(125), -2).also { it.marginEnd = dp(8) }
             addView(TextView(this@DealerPanelActivity).apply {
                 text = if (isAutoUpdating) "⌛" else "⚡"
                 textSize = 18f
@@ -1121,7 +1121,7 @@ class DealerPanelActivity : AppCompatActivity() {
             val bgColor = if (isBackgroundMode) Color.parseColor("#FDF2F2") else Color.parseColor("#ECFDF5")
             val textColor = if (isBackgroundMode) Color.parseColor("#991B1B") else Color.parseColor("#065F46")
             background = outlinedPill(bgColor, textColor, 10)
-            layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(dp(125), -2).also { it.marginEnd = dp(8) }
             val icon = TextView(this@DealerPanelActivity).apply {
                 text = if (isBackgroundMode) "👤" else "👁️"
                 textSize = 18f
