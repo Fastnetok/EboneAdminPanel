@@ -8,14 +8,12 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -26,11 +24,11 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * Modern Dealer Recharge Report with:
- *  - Material Date Range Picker (Advanced Calendar)
- *  - ISP Specific Filtering (Tap Cards)
- *  - Soft Delete (Swipe to Hide) with Restore
- *  - Professional RecyclerView UI
+ * Premium Dealer Recharge Report with:
+ *  - Material Date Range Picker (The requested Advance Calendar)
+ *  - ISP Specific Filtering (Border highlight on tap)
+ *  - Persistent Soft Delete (Swipe to Hide) with accurate count updates
+ *  - Independent Summary Cards (Totals don't zero out when filtering)
  */
 class DealerRechargeReportActivity : AppCompatActivity() {
 
@@ -58,9 +56,10 @@ class DealerRechargeReportActivity : AppCompatActivity() {
     private val textDark = Color.parseColor("#172033")
     private val textMuted = Color.parseColor("#667085")
     private val borderLight = Color.parseColor("#E4E7EC")
-    private val navyMid = Color.parseColor("#1D4ED8")
+    private val accentBlue = Color.parseColor("#1D4ED8")
     private val green = Color.parseColor("#12B76A")
     private val orange = Color.parseColor("#F79009")
+    private val navyMid = Color.parseColor("#1D4ED8")
     private val purple = Color.parseColor("#7A5AF8")
 
     data class ReportEntry(
@@ -75,8 +74,9 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(buildScreen())
 
+        loadHiddenIds()
         setupRecyclerView()
-        setThisMonthRange()
+        setTodayRange()
         loadReport()
     }
 
@@ -112,19 +112,24 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             setImageResource(R.drawable.ic_menu_rotate)
             background = null
             imageTintList = ColorStateList.valueOf(Color.WHITE)
-            setOnClickListener { hiddenIds.clear(); updateDisplayList() }
+            setOnClickListener { 
+                hiddenIds.clear()
+                saveHiddenIds()
+                updateDisplayList()
+                Toast.makeText(this@DealerRechargeReportActivity, "Data Restored", Toast.LENGTH_SHORT).show()
+            }
         })
         root.addView(header)
 
-        // Filters
+        // Filter Chips
         val filterScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val chips = LinearLayout(this).apply { 
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(16), dp(16), dp(16), 0)
         }
         chips.addView(filterChip("🗓️ Select Range") { pickCustomRange() })
+        chips.addView(filterChip("Today") { setTodayRange(); loadReport() })
         chips.addView(filterChip("This Month") { setThisMonthRange(); loadReport() })
-        chips.addView(filterChip("Last Month") { setLastMonthRange(); loadReport() })
         filterScroll.addView(chips)
         root.addView(filterScroll)
 
@@ -132,17 +137,18 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             textSize = 12f
             setTextColor(navyMid)
             setPadding(dp(20), dp(8), dp(16), dp(16))
+            setTypeface(null, Typeface.BOLD)
         }
         root.addView(filterLabel)
 
-        // ISP Cards
+        // ISP Summary Cards
         val summaryRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             weightSum = 3f
             setPadding(dp(12), 0, dp(12), 0)
         }
         
-        val (eC, eT) = createSummaryCard("E-Bone", orange)
+        val (eC, eT) = createSummaryCard("EBONE", orange)
         val (wC, wT) = createSummaryCard("Wateen", navyMid)
         val (zC, zT) = createSummaryCard("Zong", purple)
         
@@ -150,7 +156,7 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         cardWateen = wC; summaryWateen = wT
         cardZong = zC; summaryZong = zT
         
-        cardEbone.setOnClickListener { toggleIspFilter("E-Bone") }
+        cardEbone.setOnClickListener { toggleIspFilter("EBONE") }
         cardWateen.setOnClickListener { toggleIspFilter("Wateen") }
         cardZong.setOnClickListener { toggleIspFilter("Zong") }
 
@@ -160,7 +166,7 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         root.addView(summaryRow)
 
         totalText = TextView(this).apply {
-            textSize = 16f
+            textSize = 18f
             setTypeface(null, Typeface.BOLD)
             setTextColor(textDark)
             gravity = Gravity.CENTER
@@ -181,25 +187,23 @@ class DealerRechargeReportActivity : AppCompatActivity() {
     private fun createSummaryCard(label: String, color: Int): Pair<LinearLayout, TextView> {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).also { it.marginEnd = dp(4) }
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = outlinedPill(Color.WHITE, borderLight, 12)
-            isClickable = true
-            val outValue = TypedValue()
-            theme.resolveAttribute(R.attr.selectableItemBackground, outValue, true)
-            foreground = ContextCompat.getDrawable(this@DealerRechargeReportActivity, outValue.resourceId)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).also { it.marginEnd = dp(6) }
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+            background = outlinedPill(Color.WHITE, borderLight, 14)
+            elevation = dp(2).toFloat()
         }
         container.addView(TextView(this).apply {
             text = label
-            textSize = 11f
-            setTextColor(textMuted)
+            textSize = 12f
+            setTextColor(color)
             setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(4))
         })
         val valText = TextView(this).apply {
             text = "Rs. 0"
             textSize = 15f
             setTypeface(null, Typeface.BOLD)
-            setTextColor(color)
+            setTextColor(textDark)
         }
         container.addView(valText)
         return container to valText
@@ -208,10 +212,11 @@ class DealerRechargeReportActivity : AppCompatActivity() {
     private fun filterChip(label: String, onClick: () -> Unit) = TextView(this).apply {
         text = label
         textSize = 12f
-        setPadding(dp(16), dp(8), dp(16), dp(8))
-        background = outlinedPill(Color.WHITE, borderLight, 20)
+        setPadding(dp(18), dp(10), dp(18), dp(10))
+        background = outlinedPill(Color.WHITE, borderLight, 25)
         setTextColor(textDark)
-        layoutParams = LinearLayout.LayoutParams(-2, -2).also { it.marginEnd = dp(8) }
+        setTypeface(null, Typeface.BOLD)
+        layoutParams = LinearLayout.LayoutParams(-2, -2).also { it.marginEnd = dp(10) }
         setOnClickListener { onClick() }
     }
 
@@ -226,14 +231,14 @@ class DealerRechargeReportActivity : AppCompatActivity() {
                 val pos = viewHolder.adapterPosition
                 val entry = adapter.currentList[pos]
                 hiddenIds.add(entry.id)
+                saveHiddenIds()
                 updateDisplayList()
-                Toast.makeText(this@DealerRechargeReportActivity, "Item hidden locally", Toast.LENGTH_SHORT).show()
             }
-            
             override fun onChildDraw(c: Canvas, rv: RecyclerView, vh: RecyclerView.ViewHolder, dX: Float, dY: Float, s: Int, a: Boolean) {
                 val itemView = vh.itemView
                 val bg = ColorDrawable(Color.parseColor("#FEE2E2"))
-                bg.setBounds(itemView.right + dX.toInt(), itemView.top, itemView.right, itemView.bottom)
+                if (dX > 0) bg.setBounds(itemView.left, itemView.top, itemView.left + dX.toInt(), itemView.bottom)
+                else bg.setBounds(itemView.right + dX.toInt(), itemView.top, itemView.right, itemView.bottom)
                 bg.draw(c)
                 super.onChildDraw(c, rv, vh, dX, dY, s, a)
             }
@@ -244,16 +249,20 @@ class DealerRechargeReportActivity : AppCompatActivity() {
     private fun toggleIspFilter(isp: String) {
         activeIspFilter = if (activeIspFilter == isp) null else isp
         
-        // Visual feedback
-        cardEbone.background = outlinedPill(if(activeIspFilter == "E-Bone") orange else Color.WHITE, if(activeIspFilter == "E-Bone") orange else borderLight, 12)
-        cardWateen.background = outlinedPill(if(activeIspFilter == "Wateen") navyMid else Color.WHITE, if(activeIspFilter == "Wateen") navyMid else borderLight, 12)
-        cardZong.background = outlinedPill(if(activeIspFilter == "Zong") purple else Color.WHITE, if(activeIspFilter == "Zong") purple else borderLight, 12)
-        
-        summaryEbone.setTextColor(if(activeIspFilter == "E-Bone") Color.WHITE else orange)
-        summaryWateen.setTextColor(if(activeIspFilter == "Wateen") Color.WHITE else navyMid)
-        summaryZong.setTextColor(if(activeIspFilter == "Zong") Color.WHITE else purple)
+        // Border highlight remains blue, background stays white
+        cardEbone.background = outlinedPill(Color.WHITE, if(activeIspFilter == "EBONE") accentBlue else borderLight, 14)
+        cardWateen.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Wateen") accentBlue else borderLight, 14)
+        cardZong.background = outlinedPill(Color.WHITE, if(activeIspFilter == "Zong") accentBlue else borderLight, 14)
         
         updateDisplayList()
+    }
+
+    private fun setTodayRange() {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        rangeStart = cal.timeInMillis
+        rangeEnd = System.currentTimeMillis()
+        filterLabel.text = "Showing: Today (${formatDate(rangeStart)})"
     }
 
     private fun setThisMonthRange() {
@@ -262,30 +271,18 @@ class DealerRechargeReportActivity : AppCompatActivity() {
         cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
         rangeStart = cal.timeInMillis
         rangeEnd = System.currentTimeMillis()
-        filterLabel.text = "Range: ${formatDate(rangeStart)} — Present"
-    }
-
-    private fun setLastMonthRange() {
-        val cal = Calendar.getInstance()
-        cal.add(Calendar.MONTH, -1)
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
-        rangeStart = cal.timeInMillis
-        cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
-        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59)
-        rangeEnd = cal.timeInMillis
-        filterLabel.text = "Range: ${formatDate(rangeStart)} — ${formatDate(rangeEnd)}"
+        filterLabel.text = "Showing: This Month (${formatDate(rangeStart)} - Now)"
     }
 
     private fun pickCustomRange() {
         val builder = MaterialDatePicker.Builder.dateRangePicker()
-        builder.setTitleText("Select Date Range")
+        builder.setTitleText("Select Dates")
         val picker = builder.build()
         picker.show(supportFragmentManager, "RANGE_PICKER")
         picker.addOnPositiveButtonClickListener { selection ->
             rangeStart = selection.first
             rangeEnd = selection.second + (24 * 60 * 60 * 1000) - 1
-            filterLabel.text = "Custom: ${formatDate(rangeStart)} — ${formatDate(rangeEnd)}"
+            filterLabel.text = "Custom: ${formatDate(rangeStart)} - ${formatDate(rangeEnd)}"
             loadReport()
         }
     }
@@ -300,52 +297,64 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             .get()
             .addOnSuccessListener { snapshot ->
                 masterList.clear()
-                var totalE = 0.0; var totalW = 0.0; var totalZ = 0.0
-                
                 snapshot.documents.forEach { doc ->
                     val p = doc.getString("panel") ?: ""
                     val ispName = when(p.uppercase()) {
-                        "EBONE", "EBILL" -> "E-Bone"
+                        "EBONE", "EBILL" -> "EBONE"
                         "WATEEN" -> "Wateen"
                         "ZONG" -> "Zong"
                         else -> p
                     }
-                    val amt = doc.getDouble("amount") ?: 0.0
-                    val entry = ReportEntry(doc.id, doc.getString("dealerName") ?: "Unknown", ispName, amt, doc.getLong("submittedAt") ?: 0L)
-                    masterList.add(entry)
-                    
-                    when(ispName) {
-                        "E-Bone" -> totalE += amt
-                        "Wateen" -> totalW += amt
-                        "Zong" -> totalZ += amt
-                    }
+                    masterList.add(ReportEntry(doc.id, doc.getString("dealerName") ?: "Unknown", ispName, doc.getDouble("amount") ?: 0.0, doc.getLong("submittedAt") ?: 0L))
                 }
-                
-                summaryEbone.text = "Rs. ${"%,.0f".format(totalE)}"
-                summaryWateen.text = "Rs. ${"%,.0f".format(totalW)}"
-                summaryZong.text = "Rs. ${"%,.0f".format(totalZ)}"
-                
                 updateDisplayList()
             }
     }
 
     private fun updateDisplayList() {
-        val filtered = masterList.filter { 
-            !hiddenIds.contains(it.id) && (activeIspFilter == null || it.panel == activeIspFilter)
+        // 1. Calculate Summary Card totals (always based on unhidden items, ignoring ISP filter)
+        val unhiddenItems = masterList.filter { !hiddenIds.contains(it.id) }
+        var totalE = 0.0; var totalW = 0.0; var totalZ = 0.0
+        
+        unhiddenItems.forEach { 
+            when(it.panel) {
+                "EBONE" -> totalE += it.amount
+                "Wateen" -> totalW += it.amount
+                "Zong" -> totalZ += it.amount
+            }
         }
-        adapter.submitList(filtered)
-        val total = filtered.sumOf { it.amount }
-        totalText.text = "Total: Rs. ${"%,.0f".format(total)}"
+        
+        summaryEbone.text = "Rs. ${"%,.0f".format(totalE)}"
+        summaryWateen.text = "Rs. ${"%,.0f".format(totalW)}"
+        summaryZong.text = "Rs. ${"%,.0f".format(totalZ)}"
+        
+        // 2. Filter the RecyclerView list based on both hidden items AND active ISP selection
+        val filteredList = unhiddenItems.filter { 
+            activeIspFilter == null || it.panel == activeIspFilter
+        }
+        adapter.submitList(filteredList)
+        
+        // 3. Update the Combined Total at the bottom
+        val grandTotal = filteredList.sumOf { it.amount }
+        totalText.text = "Total Combined: Rs. ${"%,.0f".format(grandTotal)}"
+    }
+
+    private fun saveHiddenIds() {
+        getSharedPreferences("report_prefs", MODE_PRIVATE).edit().putStringSet("hidden_ids", hiddenIds).apply()
+    }
+
+    private fun loadHiddenIds() {
+        val saved = getSharedPreferences("report_prefs", MODE_PRIVATE).getStringSet("hidden_ids", emptySet())
+        hiddenIds.clear(); hiddenIds.addAll(saved ?: emptySet())
     }
 
     private fun outlinedPill(bg: Int, stroke: Int, radius: Int) = GradientDrawable().apply {
-        setColor(bg); setCornerRadius(dp(radius).toFloat()); setStroke(dp(1), stroke)
+        setColor(bg); setCornerRadius(dp(radius).toFloat()); setStroke(dp(2), stroke)
     }
 
     inner class ReportAdapter : RecyclerView.Adapter<ReportAdapter.VH>() {
         var currentList = listOf<ReportEntry>()
         fun submitList(list: List<ReportEntry>) { currentList = list; notifyDataSetChanged() }
-        
         override fun onCreateViewHolder(p: ViewGroup, t: Int) = VH(LayoutInflater.from(p.context).inflate(
             R.layout.simple_list_item_2, p, false))
         override fun getItemCount() = currentList.size
@@ -353,29 +362,20 @@ class DealerRechargeReportActivity : AppCompatActivity() {
             val item = currentList[p]
             val ctx = h.itemView.context
             val row = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), dp(12), dp(12), dp(12))
-                background = outlinedPill(Color.WHITE, borderLight, 10)
-                layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(8) }
+                orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(14), dp(14), dp(14))
+                background = outlinedPill(Color.WHITE, borderLight, 12)
+                layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(10) }
+                elevation = dp(1).toFloat()
             }
-            
             val top = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
-            top.addView(TextView(ctx).apply { text = item.dealerName; textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(textDark); layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-            top.addView(TextView(ctx).apply { text = "Rs. ${"%,.0f".format(item.amount)}"; textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(green) })
+            top.addView(TextView(ctx).apply { text = item.dealerName; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(textDark); layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
+            top.addView(TextView(ctx).apply { text = "Rs. ${"%,.0f".format(item.amount)}"; textSize = 15f; setTypeface(null, Typeface.BOLD); setTextColor(green) })
             row.addView(top)
-            
             val bot = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, 0) }
-            bot.addView(TextView(ctx).apply { 
-                text = item.panel
-                textSize = 11f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(when(item.panel) { "Wateen" -> navyMid; "Zong" -> purple; else -> orange })
-            })
+            bot.addView(TextView(ctx).apply { text = item.panel; textSize = 12f; setTypeface(null, Typeface.BOLD); setTextColor(when(item.panel) { "Wateen" -> navyMid; "Zong" -> purple; else -> orange }) })
             bot.addView(TextView(ctx).apply { text = "  •  " + SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(item.timestamp)); textSize = 11f; setTextColor(textMuted) })
             row.addView(bot)
-            
-            (h.itemView as ViewGroup).removeAllViews()
-            (h.itemView as ViewGroup).addView(row)
+            (h.itemView as ViewGroup).apply { removeAllViews(); addView(row) }
         }
         inner class VH(v: View) : RecyclerView.ViewHolder(v)
     }
