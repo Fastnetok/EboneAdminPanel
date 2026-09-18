@@ -52,7 +52,8 @@ class AddComplaintActivity : AppCompatActivity() {
 
                     selectedCompany = selectedISP
 
-                    val intent = Intent(this, WebViewLoginActivity::class.java)
+                    val targetActivity = WebViewRouter.getTargetActivity(selectedISP, null)
+                    val intent = Intent(this, targetActivity)
                     intent.putExtra("selected_isp", selectedISP)
                     webViewLauncher.launch(intent)
                 }

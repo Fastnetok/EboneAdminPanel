@@ -271,7 +271,9 @@ class SendDealerPaymentActivity : AppCompatActivity() {
             .setPositiveButton("Send") { _, _ ->
                 sendButton.isEnabled = false
                 statusText.text = "Opening $panel ($dealerZone) panel…"
-                val webIntent = Intent(this, WebViewLoginActivity::class.java).apply {
+                
+                val targetActivity = WebViewRouter.getTargetActivity(panel, dealerZone)
+                val webIntent = Intent(this, targetActivity).apply {
                     putExtra("selected_isp", panel)
                     putExtra("manual_action", "DEALER_TOPUP")
                     putExtra("dealer_ebone_id", ispDealerId)

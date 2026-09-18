@@ -196,17 +196,22 @@ class WateenWebViewActivity : AppCompatActivity() {
                 saveCookieForCurrentAccount("https://panel.wateen.com")
                 cacheIspSessionCookieIfApplicable("WATEEN", "https://panel.wateen.com")
                 
-                if (manualAction == "RESOLVE_MONITOR" && autoActivateCustomerId != null) {
-                    if (!url.contains("/user/user/online")) {
-                        webView.loadUrl("https://panel.wateen.com/user/user/online")
-                    } else {
-                        performVisualAutoResolve("input[aria-controls=\"allonlineUsers\"]", "")
-                    }
-                } else if ((manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) || (manualAction == "FETCH_DEALER_ID" && !dealerSearchName.isNullOrBlank())) {
+                if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
                     if (!wateenDealerListLoadAttempted) {
                         wateenDealerListLoadAttempted = true
                         Log.d(TAG, "Loading all dealers list")
                         webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/dealer/dealer/all") }, 800)
+                    }
+                } else if (manualAction == "FETCH_DEALER_ID" && !dealerSearchName.isNullOrBlank()) {
+                    if (!wateenDealerListLoadAttempted) {
+                        wateenDealerListLoadAttempted = true
+                        webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/dealer/dealer/all") }, 800)
+                    }
+                } else if (manualAction == "RESOLVE_MONITOR" && autoActivateCustomerId != null) {
+                    if (!url.contains("/user/user/online")) {
+                        webView.loadUrl("https://panel.wateen.com/user/user/online")
+                    } else {
+                        performVisualAutoResolve("input[aria-controls=\"allonlineUsers\"]", "")
                     }
                 } else if (manualAction == "CHECK_BALANCE") {
                     if (!url.contains("/user/user/") && !url.contains("/dealer/dealer/")) {

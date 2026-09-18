@@ -351,8 +351,9 @@ object DealerPaymentVerifier {
         val zone = transfer.zone
         val amount = transfer.amount
 
+        val targetActivity = WebViewRouter.getTargetActivity(panel, zone)
         val transferIntent =
-            Intent(context, WebViewLoginActivity::class.java).apply {
+            Intent(context, targetActivity).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra("selected_isp", panel)
                 putExtra("manual_action", "DEALER_TOPUP")

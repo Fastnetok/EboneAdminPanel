@@ -177,6 +177,12 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- Isolated WebView Activities -->
+        <activity android:name=".EboneWebViewActivity" android:exported="false" />
+        <activity android:name=".WateenWebViewActivity" android:exported="false" />
+        <activity android:name=".ZongOkaraWebViewActivity" android:exported="false" />
+        <activity android:name=".ZongRenalaWebViewActivity" android:exported="false" />
+
         <!-- FileProvider for APK install -->
         <provider
             android:name="androidx.core.content.FileProvider"

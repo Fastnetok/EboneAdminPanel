@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Locale
 
 /**
  * Isolated WebView flow for ZONG OKARA.
@@ -44,6 +45,8 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private var dealerInternalId: String? = null
     private var dealerDisplayName: String? = null
     private var dealerSearchName: String? = null
+    private var autoActivateCustomerId: String? = null
+    private var zongDetailsFetchDone = false
 
     private val domain = "https://turbonet.zong.com.pk"
     private val loginUrl = "$domain/login.php"
@@ -66,6 +69,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         dealerInternalId = intent.getStringExtra("dealer_internal_id")
         dealerDisplayName = intent.getStringExtra("dealer_display_name")
         dealerSearchName = intent.getStringExtra("dealer_search_name")
+        autoActivateCustomerId = intent.getStringExtra("auto_activate_customer_id")
         sourceTransactionId = intent.getStringExtra("source_transaction_id")
 
         webView = findViewById(R.id.loginWebView)
@@ -125,6 +129,12 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                 }
             }
 
+            url.contains("customer_portal.php", ignoreCase = true) -> {
+                if (manualAction == null || manualAction == "RELIEF_VIEW") {
+                    webView.postDelayed({ fetchZongCustomerDetails() }, 1500)
+                }
+            }
+
             url.contains("sub_dealers.php", ignoreCase = true) &&
                     manualAction == "DEALER_TOPUP" -> {
                 if (!dealerTopupAttempted) {
@@ -161,8 +171,52 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                         balanceCheckAttempted = true
                         webView.postDelayed({ readZongOkaraBalance() }, 700)
                     }
+                } else if (autoActivateCustomerId != null) {
+                    // NEW: handling for complaint creation / user search
+                    Log.d("ZongOkaraWebView", "Search requested for customer: $autoActivateCustomerId")
+                    webView.postDelayed({ searchZongCustomer(autoActivateCustomerId!!) }, 500)
                 }
             }
+        }
+    }
+
+    private fun searchZongCustomer(customerId: String) {
+        val script = """
+            (function(){
+                var sel = document.querySelector('select[name="managercustomers_length"]');
+                if(sel){ sel.value = '1000'; sel.dispatchEvent(new Event('change', {bubbles:true})); }
+                
+                var inp = document.querySelector('input[aria-controls="managercustomers"], .dataTables_filter input');
+                if(inp){
+                    inp.focus();
+                    inp.value = '$customerId';
+                    inp.dispatchEvent(new Event('input', {bubbles:true}));
+                    inp.dispatchEvent(new Event('keyup', {bubbles:true}));
+                    return 'searching';
+                }
+                return 'search_box_not_found';
+            })()
+        """.trimIndent()
+        
+        webView.evaluateJavascript(script) { res ->
+            Log.d("ZongOkaraWebView", "Search status: $res")
+            webView.postDelayed({
+                webView.evaluateJavascript(
+                    "(function(){" +
+                            "  var links = document.querySelectorAll('a[href*=\"customer_portal.php\"]');" +
+                            "  for(var i=0;i<links.length;i++){" +
+                            "    if(links[i].innerText.trim()==='$customerId'){ return links[i].href; }" +
+                            "  }" +
+                            "  if(links.length>0){ return links[0].href; }" +
+                            "  return '';" +
+                            "})()"
+                ) { profileUrl ->
+                    val cleanUrl = profileUrl.trim().removeSurrounding("\"")
+                    if (cleanUrl.isNotEmpty() && cleanUrl.startsWith("http")) {
+                        webView.loadUrl(cleanUrl)
+                    }
+                }
+            }, 1500)
         }
     }
 
@@ -248,59 +302,61 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private fun searchAndClickZongDealer(searchName: String, attempt: Int = 1) {
         logZongOkaraTopup("Starting dealer search: $searchName, attempt=$attempt")
         if (searchName.isBlank()) {
-            finishTopupFailure("Zong dealer name/search value is missing")
+            finishTopupFailure("Zong dealer name is missing")
             return
         }
 
-        val searchJs = JSONObjectEscape.forJavaScript(searchName)
+        // Strip zone if present (e.g. "Abbas046 (Okara)" -> "Abbas046")
+        val cleanName = searchName.substringBefore("(").trim()
+        val searchJs = JSONObjectEscape.forJavaScript(cleanName)
 
         webView.evaluateJavascript(
             "(function(){" +
-                    "var inp=document.querySelector('input[type=search][aria-controls=\"table3\"],input[aria-controls=\"table3\"]');" +
-                    "if(!inp)return 'search_not_found';" +
-                    "inp.focus();inp.value='$searchJs';" +
-                    "inp.dispatchEvent(new Event('input',{bubbles:true}));" +
-                    "inp.dispatchEvent(new Event('keyup',{bubbles:true}));" +
+                    "var inp = document.querySelector('input[type=search][aria-controls=\"table3\"], input[aria-controls=\"table3\"]');" +
+                    "if(!inp) return 'search_not_found';" +
+                    "inp.focus(); inp.value = '$searchJs';" +
+                    "inp.dispatchEvent(new Event('input', {bubbles:true}));" +
+                    "inp.dispatchEvent(new Event('keyup', {bubbles:true}));" +
                     "return 'search_done';" +
                     "})()"
         ) { raw ->
-            if (raw.trim().removeSurrounding("\"") != "search_done") {
-                if (attempt < 8) {
-                    webView.postDelayed({ searchAndClickZongDealer(searchName, attempt + 1) }, 700)
-                } else finishTopupFailure("Zong dealer search box not found")
+            val res = raw.trim().removeSurrounding("\"")
+            if (res != "search_done") {
+                if (attempt < 10) webView.postDelayed({ searchAndClickZongDealer(searchName, attempt + 1) }, 1000)
+                else finishTopupFailure("Zong dealer search box not found")
                 return@evaluateJavascript
             }
 
-            webView.postDelayed({ clickZongDealerLink(searchName, 1) }, 1800)
+            webView.postDelayed({ clickZongDealerLink(cleanName, 1) }, 2000)
         }
     }
 
     private fun clickZongDealerLink(searchName: String, attempt: Int) {
         logZongOkaraTopup("Finding dealer link: $searchName, attempt=$attempt")
-        val searchJs = JSONObjectEscape.forJavaScript(searchName)
+        val searchJs = JSONObjectEscape.forJavaScript(searchName.lowercase(Locale.ROOT))
 
         webView.evaluateJavascript(
             "(function(){" +
-                    "var links=document.querySelectorAll(\"a[href*='subdealer_portal.php']\");" +
-                    "var matches=[];" +
-                    "for(var i=0;i<links.length;i++){" +
-                    "var t=(links[i].innerText||'').trim();" +
-                    "if(t.toLowerCase()==='$searchJs'.toLowerCase())matches.push(links[i]);" +
+                    "var links = document.querySelectorAll(\"a[href*='subdealer_portal.php']\");" +
+                    "var matches = [];" +
+                    "for(var i=0; i<links.length; i++){" +
+                    "  var t = (links[i].innerText||'').replace(/\\s+/g, ' ').trim().toLowerCase();" +
+                    "  if(t.indexOf('$searchJs') > -1) matches.push(links[i]);" +
                     "}" +
-                    "if(matches.length!==1)return 'ambiguous';" +
-                    "matches[0].removeAttribute('target');" +
-                    "matches[0].click();" +
+                    "if(matches.length === 0) return 'not_found';" +
+                    "var target = matches[0];" +
+                    "target.removeAttribute('target');" +
+                    "target.click();" +
                     "return 'clicked';" +
                     "})()"
         ) { raw ->
-            if (raw.trim().removeSurrounding("\"") == "clicked") {
-                return@evaluateJavascript
-            }
+            val result = raw.trim().removeSurrounding("\"")
+            if (result == "clicked") return@evaluateJavascript
 
-            if (attempt < 8) {
-                webView.postDelayed({ clickZongDealerLink(searchName, attempt + 1) }, 800)
+            if (attempt < 12) {
+                webView.postDelayed({ clickZongDealerLink(searchName, attempt + 1) }, 1000)
             } else {
-                finishTopupFailure("Could not find exactly one Zong dealer named $searchName")
+                finishTopupFailure("Could not find Zong dealer link for \"$searchName\"")
             }
         }
     }
@@ -512,6 +568,85 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             }
         )
         finish()
+    }
+
+    private fun fetchZongCustomerDetails(attempt: Int = 1) {
+        if (zongDetailsFetchDone) return
+        
+        val script = """
+            (function(){
+                var userId = '', address = '', phone = '', expiry = '';
+                var tables = document.querySelectorAll('table.skills');
+                for (var t=0; t<tables.length; t++){
+                    var rows = tables[t].querySelectorAll('tbody tr');
+                    var hasFullName = false;
+                    for (var i=0; i<rows.length; i++){
+                        var chk = rows[i].querySelector('td.item');
+                        if (chk && chk.textContent.trim() === 'Full Name') { hasFullName = true; break; }
+                    }
+                    if (!hasFullName) continue;
+                    for (var i=0; i<rows.length; i++){
+                        var itemTd = rows[i].querySelector('td.item');
+                        if (!itemTd) continue;
+                        var label = itemTd.textContent.trim();
+                        var cells = rows[i].querySelectorAll('td');
+                        var valueTd = cells[cells.length - 1];
+                        var value = valueTd ? valueTd.textContent.trim() : '';
+                        if (label === 'PPPoE Auth User') { userId = value; }
+                        else if (label === 'Address') { address = value; }
+                        else if (label === 'Mobile') { phone = value; }
+                    }
+                    break;
+                }
+                var tiles = document.querySelectorAll('.col-md-4');
+                for (var j=0; j<tiles.length; j++){
+                    var title = tiles[j].querySelector('.title');
+                    if (title && title.innerText.indexOf('Expiration') > -1){
+                        var val = tiles[j].querySelector('.counter');
+                        if (val) expiry = (val.textContent || '').trim();
+                    }
+                }
+                return JSON.stringify({userId:userId, address:address, phone:phone, expiry:expiry});
+            })()
+        """.trimIndent()
+        
+        webView.evaluateJavascript(script) { result ->
+            try {
+                val clean = result.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\")
+                val userId = Regex("\"userId\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                val address = Regex("\"address\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
+                val phone = normalizePakPhone(Regex("\"phone\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: "")
+
+                val incomplete = address.isEmpty() || phone.isEmpty()
+                if (incomplete && attempt < 5) {
+                    webView.postDelayed({ fetchZongCustomerDetails(attempt + 1) }, 800)
+                    return@evaluateJavascript
+                }
+
+                if (!zongDetailsFetchDone && (userId.isNotEmpty() || address.isNotEmpty() || phone.isNotEmpty())) {
+                    zongDetailsFetchDone = true
+                    val resultIntent = Intent().apply {
+                        putExtra("fetched_user_id", userId)
+                        putExtra("fetched_address", address)
+                        putExtra("fetched_phone", phone)
+                        putExtra("manual_action_success", true)
+                    }
+                    setResult(RESULT_OK, resultIntent)
+                    finish()
+                }
+            } catch (e: Exception) {
+                Log.e("ZongOkaraWebView", "Error in fetchZongCustomerDetails: ${e.message}")
+            }
+        }
+    }
+
+    private fun normalizePakPhone(raw: String): String {
+        var p = raw.trim().replace(" ", "").replace("-", "")
+        return when {
+            p.startsWith("+92") -> "0" + p.substring(3)
+            p.startsWith("92") && p.length > 10 -> "0" + p.substring(2)
+            else -> p
+        }
     }
 
     private fun finishFailure(reason: String) {

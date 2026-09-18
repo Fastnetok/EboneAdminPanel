@@ -182,10 +182,11 @@ object DealerAutoTransferProcessor {
                             return@addOnSuccessListener
                         }
 
+                        val targetActivity = WebViewRouter.getTargetActivity(panel, zone)
                         val launchIntent =
                             Intent(
                                 context,
-                                WebViewLoginActivity::class.java
+                                targetActivity
                             ).apply {
                                 addFlags(
                                     Intent.FLAG_ACTIVITY_NEW_TASK or

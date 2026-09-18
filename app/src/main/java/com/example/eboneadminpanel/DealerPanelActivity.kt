@@ -1,22 +1,42 @@
 package com.example.eboneadminpanel
 
+import android.R
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.InputType
+import android.text.TextUtils
+import android.text.TextWatcher
+import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 
 class DealerPanelActivity : AppCompatActivity() {
 
@@ -33,28 +53,19 @@ class DealerPanelActivity : AppCompatActivity() {
     private var dealerCount = 0
     private var totalBalance = 0.0
 
-    // NEW: dealerId -> dealer name lookup, kept in sync from the same
-    // "dealers" snapshot listener that already builds the Dealers tab.
-    // observePending() uses this so every pending/verified payment row
-    // can show WHICH dealer it belongs to — previously the dealerId was
-    // read off each transaction but never actually looked up or shown.
     private val dealerNameCache = HashMap<String, String>()
 
-    // NEW: remembers which EditText (inside whichever dialog is open) to
-    // fill once WebViewLoginActivity's FETCH_DEALER_ID flow returns a
-    // numeric Wateen dealer ID.
     private var pendingFetchIdInput: EditText? = null
     private val REQUEST_FETCH_DEALER_ID = 7001
 
-    // NEW: live franchise balances (franchiseSettings/balances doc) —
-    // separate from any individual dealer's balance. Updated whenever
-    // the 💰 Check Balance action successfully reads the Ebone panel.
     private var franchiseBalancesListener: ListenerRegistration? = null
     private lateinit var franchiseBalancesRow: LinearLayout
 
     private val REQUEST_CHECK_BALANCE = 7002
     private val autoUpdateQueue = mutableListOf<Pair<String, String>>()
     private var isAutoUpdating = false
+    private var isBackgroundMode = false
+    private var dealerSearchQuery = ""
 
     private val paymentAccountNames = listOf(
         "EasyPaisa", "JazzCash", "SadaPay", "Raast ID",
@@ -77,6 +88,11 @@ class DealerPanelActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initial load of background mode preference
+        val prefs = getSharedPreferences("dealer_panel_prefs", MODE_PRIVATE)
+        isBackgroundMode = prefs.getBoolean("is_background_mode", false)
+        
         setContentView(buildScreen())
         observeDealers()
         observePending()
@@ -107,11 +123,6 @@ class DealerPanelActivity : AppCompatActivity() {
     // ===================== SCREEN =====================
 
     private fun buildScreen(): LinearLayout {
-        // NEW: root is no longer wrapped in an outer ScrollView. The
-        // header, stats, franchise balances, and pending-payments
-        // section stay fixed on screen; only the Dealers list below
-        // scrolls (in its own ScrollView with weight=1, filling
-        // whatever vertical space is left).
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bgLight)
@@ -120,11 +131,6 @@ class DealerPanelActivity : AppCompatActivity() {
         root.addView(buildHeader())
         root.addView(buildStatsRow())
 
-        // NEW: wrapped in a horizontal scroll — with Zong now able to
-        // show both "Zong (Okara)" and "Zong (Renala)" chips alongside
-        // Ebone/Wateen, that's up to 4 chips, which can look cramped on
-        // narrow screens if forced into a fixed-width row. Scrolls
-        // instead of squeezing.
         val franchiseBalancesScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
         }
@@ -135,6 +141,30 @@ class DealerPanelActivity : AppCompatActivity() {
         franchiseBalancesScroll.addView(franchiseBalancesRow)
         root.addView(franchiseBalancesScroll)
 
+        // NEW: Search Dealers bar
+        val searchContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val searchInput = EditText(this).apply {
+            hint = "Search dealers by name..."
+            textSize = 14f
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = outlinedPill(Color.WHITE, borderLight, 10)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    dealerSearchQuery = s?.toString()?.lowercase() ?: ""
+                    observeDealers() // Trigger re-filter
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+        searchContainer.addView(searchInput)
+        root.addView(searchContainer)
+
         root.addView(sectionTitle("Pending Payments"))
         pendingList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -142,10 +172,6 @@ class DealerPanelActivity : AppCompatActivity() {
         }
         root.addView(pendingList)
 
-        // NEW: Dealers section is its own independently-scrollable area
-        // — layout_height=0 + weight=1 makes it fill all remaining
-        // vertical space, and scrolling inside it never moves the
-        // header/stats/pending section above.
         val dealersScroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
         }
@@ -174,9 +200,6 @@ class DealerPanelActivity : AppCompatActivity() {
             setPadding(dp(20), dp(48), dp(20), dp(20))
         }
 
-        // Title row — back arrow + title/subtitle ONLY. Icon buttons
-        // moved to their own scrollable row below, so this text never
-        // gets squeezed/wrapped no matter how many action icons exist.
         val titleRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -194,7 +217,7 @@ class DealerPanelActivity : AppCompatActivity() {
                 text = "Dealer Panel"
                 textSize = 20f
                 setTextColor(Color.WHITE)
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
                 maxLines = 1
             })
             addView(TextView(this@DealerPanelActivity).apply {
@@ -202,23 +225,16 @@ class DealerPanelActivity : AppCompatActivity() {
                 textSize = 12f
                 setTextColor(Color.parseColor("#B8C2E0"))
                 maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
+                ellipsize = TextUtils.TruncateAt.END
             })
         })
         header.addView(titleRow)
 
-        // NEW: icon action row — horizontally scrollable so it never
-        // forces the title to wrap and never overflows off-screen, no
-        // matter how many action icons this screen ends up with.
         val iconScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             isFillViewport = true
             setPadding(0, dp(14), 0, 0)
         }
-        // NEW: wrapper centers the icon row horizontally when it fits
-        // within the screen width (fillViewport stretches this wrapper
-        // to at least the visible width); if the icons ever overflow a
-        // narrow screen, the HorizontalScrollView still scrolls normally.
         val iconRowWrapper = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -232,32 +248,16 @@ class DealerPanelActivity : AppCompatActivity() {
         }
         iconRow.addView(iconButton("⟳") { scanNow() })
         iconRow.addView(spacerH(8))
-        // NEW: debug-only — opens the Ebone panel logged in, with the tap
-        // inspector active, and NO auto-activate customer ID (so it just
-        // sits on /clients for manual tapping/exploration). Temporary
-        // testing aid for confirming franchise-balance-transfer selectors
-        // before any real automation is wired up — safe to remove once
-        // selectors are confirmed.
         iconRow.addView(iconButton("🔍") { inspectEbonePanel() })
         iconRow.addView(spacerH(8))
-        // Send Dealer Payment — permanent screen (Dealer → Company →
-        // Amount → Send). Replaces the earlier temporary test dialog.
         iconRow.addView(iconButton("💸") { openSendPaymentScreen() })
         iconRow.addView(spacerH(8))
-        // NEW: reads the Ebone franchise balance dropdown and saves it +
-        // fires a low-balance notification if under the configured
-        // threshold.
         iconRow.addView(iconButton("💰") { checkEboneBalance() })
         iconRow.addView(spacerH(8))
-        // NEW: opens the Payment Log / transaction history screen.
         iconRow.addView(iconButton("📄") { startActivity(Intent(this, DealerPaymentLogActivity::class.java)) })
         iconRow.addView(spacerH(8))
-        // NEW: low-balance notification threshold settings, per panel.
         iconRow.addView(iconButton("⚙") { showThresholdSettingsDialog() })
         iconRow.addView(spacerH(8))
-        // NEW: per-zone service settings — which ISPs (Ebone/Wateen/
-        // Zong) are actually enabled for each franchise/zone (e.g.
-        // Renala only runs Zong right now while Okara runs all three).
         iconRow.addView(iconButton("🏷") { showZoneServiceSettingsDialog() })
         iconRow.addView(spacerH(8))
         iconRow.addView(iconButton("+") { showAddDealerDialog() })
@@ -294,7 +294,7 @@ class DealerPanelActivity : AppCompatActivity() {
         fun statCard(label: String, colorAccent: Int): Pair<LinearLayout, TextView> {
             val valueText = TextView(this).apply {
                 textSize = 20f
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
                 setTextColor(textDark)
             }
             val card = LinearLayout(this).apply {
@@ -341,7 +341,7 @@ class DealerPanelActivity : AppCompatActivity() {
     private fun sectionTitle(text: String): TextView = TextView(this).apply {
         this.text = text
         textSize = 14f
-        setTypeface(null, android.graphics.Typeface.BOLD)
+        setTypeface(null, Typeface.BOLD)
         setTextColor(textDark)
         setPadding(dp(16), dp(20), dp(16), dp(8))
     }
@@ -366,6 +366,11 @@ class DealerPanelActivity : AppCompatActivity() {
                 }
 
                 query.documents.forEach { document ->
+                    val name = document.getString("name") ?: ""
+                    if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {
+                        return@forEach
+                    }
+
                     val wateen = document.getDouble("wateenBalance") ?: 0.0
                     val ebone = document.getDouble("eboneBalance") ?: 0.0
                     val zong = document.getDouble("zongBalance") ?: 0.0
@@ -379,7 +384,7 @@ class DealerPanelActivity : AppCompatActivity() {
             }
     }
 
-    private fun dealerCard(dealerId: String, document: com.google.firebase.firestore.DocumentSnapshot): LinearLayout {
+    private fun dealerCard(dealerId: String, document: DocumentSnapshot): LinearLayout {
         val wateen = document.getDouble("wateenBalance") ?: 0.0
         val ebone = document.getDouble("eboneBalance") ?: 0.0
         val zong = document.getDouble("zongBalance") ?: 0.0
@@ -410,7 +415,7 @@ class DealerPanelActivity : AppCompatActivity() {
             addView(TextView(this@DealerPanelActivity).apply {
                 text = document.getString("name") ?: ""
                 textSize = 15f
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
                 setTextColor(textDark)
             })
             addView(TextView(this@DealerPanelActivity).apply {
@@ -419,16 +424,12 @@ class DealerPanelActivity : AppCompatActivity() {
                 setTextColor(textMuted)
             })
         })
-        // NEW: zone tag chip — small, muted, reuses the existing palette
-        // (Okara = navy, Renala = purple) so Renala dealers are visually
-        // distinguishable at a glance without looking like a mismatched
-        // color splash. Defaults missing zone to "Okara".
         val zone = document.getString("zone")?.ifBlank { null } ?: "Okara"
         val zoneColor = if (zone == "Okara") navyMid else purple
         topRow.addView(TextView(this).apply {
             text = zone
             textSize = 10f
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTypeface(null, Typeface.BOLD)
             setTextColor(zoneColor)
             setPadding(dp(8), dp(4), dp(8), dp(4))
             background = outlinedPill(Color.WHITE, zoneColor, 10)
@@ -458,23 +459,19 @@ class DealerPanelActivity : AppCompatActivity() {
                 text = label
                 textSize = 10f
                 setTextColor(accent)
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
             })
             addView(TextView(this@DealerPanelActivity).apply {
                 text = "Rs. ${"%.0f".format(amount)}"
                 textSize = 13f
                 setTextColor(textDark)
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
             })
         }
 
     // ===================== PENDING PAYMENTS (LIVE) =====================
 
     private fun observePending() {
-        // NEW: also fetch VERIFIED (SMS-matched today, waiting to be
-        // sent on the panel) and NEEDS_REVIEW (matched an OLDER SMS —
-        // held for manual confirmation, not auto-credited) alongside
-        // PENDING (waiting for SMS match) ones.
         pendingListener = db.collection("dealerTransactions")
             .whereIn("status", listOf("PENDING", "VERIFIED", "NEEDS_REVIEW", "REJECTED_DUPLICATE"))
             .addSnapshotListener { query, error ->
@@ -482,9 +479,6 @@ class DealerPanelActivity : AppCompatActivity() {
 
                 pendingList.removeAllViews()
 
-                // NEW: a VERIFIED row that's already been sent
-                // (transferStatus == "TRANSFERRED") is done — don't
-                // count or show it here.
                 val relevantDocs = query.documents.filter { doc ->
                     val status = doc.getString("status")
                     val transferStatus = doc.getString("transferStatus") ?: ""
@@ -547,20 +541,7 @@ class DealerPanelActivity : AppCompatActivity() {
                         )
 
                         "VERIFIED" -> {
-                            /*
-                             * LIVE/TODAY verified payments must never expose
-                             * the old manual Send Now chain. The verifier is
-                             * already responsible for starting the existing
-                             * DEALER_TOPUP automation.
-                             */
                             when (transferStatus) {
-                                // NEW: AUTO_CLAIMED is the brief (usually
-                                // sub-second) state between "verified" and
-                                // WebViewLoginActivity actually opening —
-                                // introduced by the fix that stops the same
-                                // payment from being sent to the panel twice.
-                                // Shown identically to AUTO_SENDING so the
-                                // row never silently disappears mid-flow.
                                 "AUTO_SENDING", "AUTO_CLAIMED" -> pendingList.addView(
                                     swipeToDeleteWrapper(
                                         autoSendingRow(
@@ -595,10 +576,6 @@ class DealerPanelActivity : AppCompatActivity() {
             }
     }
 
-    /** NEW: permanently deletes a dealerTransactions record from
-     * Firestore — used by the swipe-to-delete action on the Pending
-     * Payments list. This is a real, permanent delete (not a status
-     * change) — there is no undo once confirmed. */
     private fun deletePendingPayment(transactionId: String) {
         db.collection("dealerTransactions").document(transactionId).delete()
             .addOnSuccessListener {
@@ -609,22 +586,8 @@ class DealerPanelActivity : AppCompatActivity() {
             }
     }
 
-    /**
-     * NEW: wraps a row in a swipe-left-to-reveal-delete container —
-     * swipe the row left to reveal a red 🗑 trash icon on the right,
-     * tap it to permanently delete (with confirmation).
-     *
-     * Uses a proper onInterceptTouchEvent-based FrameLayout instead of a
-     * plain OnTouchListener on the row: the parent only steals the
-     * touch away from children once it detects a real horizontal drag
-     * (past a small threshold), so a short tap on a child button (like
-     * "Send Now") still registers as a normal click, but a swipe
-     * gesture starting ANYWHERE on the row — including on top of that
-     * button — works smoothly, no dead zones.
-     */
     private fun swipeToDeleteWrapper(contentRow: LinearLayout, onDelete: () -> Unit): FrameLayout {
         val revealedPx = dp(72).toFloat()
-
         val deleteBg = LinearLayout(this).apply {
             gravity = Gravity.CENTER
             setBackgroundColor(Color.parseColor("#D92D20"))
@@ -638,38 +601,28 @@ class DealerPanelActivity : AppCompatActivity() {
                 setTextColor(Color.WHITE)
             })
         }
-
         contentRow.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
-
         val touchSlopPx = dp(10).toFloat()
-
         val frame = object : FrameLayout(this) {
             private var downX = 0f
             private var downY = 0f
             private var startTranslation = 0f
             private var dragging = false
-
-            override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
+            override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
                 when (ev.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
+                    MotionEvent.ACTION_DOWN -> {
                         downX = ev.x
                         downY = ev.y
                         startTranslation = contentRow.translationX
                         dragging = false
                     }
-                    android.view.MotionEvent.ACTION_MOVE -> {
+                    MotionEvent.ACTION_MOVE -> {
                         val dx = ev.x - downX
                         val dy = ev.y - downY
-                        if (!dragging &&
-                            kotlin.math.abs(dx) > touchSlopPx &&
-                            kotlin.math.abs(dx) > kotlin.math.abs(dy)
-                        ) {
-                            // A real horizontal drag — take over from
-                            // whichever child (e.g. the Send Now button)
-                            // would otherwise have received this touch.
+                        if (!dragging && abs(dx) > touchSlopPx && abs(dx) > abs(dy)) {
                             dragging = true
                         }
                         if (dragging) return true
@@ -677,23 +630,19 @@ class DealerPanelActivity : AppCompatActivity() {
                 }
                 return false
             }
-
-            override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
+            override fun onTouchEvent(ev: MotionEvent): Boolean {
                 when (ev.actionMasked) {
-                    android.view.MotionEvent.ACTION_MOVE -> {
+                    MotionEvent.ACTION_MOVE -> {
                         if (dragging) {
                             val dx = ev.x - downX
                             contentRow.translationX = (startTranslation + dx).coerceIn(-revealedPx, 0f)
                             return true
                         }
                     }
-                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (dragging) {
                             val shouldReveal = contentRow.translationX < -revealedPx / 2
-                            contentRow.animate()
-                                .translationX(if (shouldReveal) -revealedPx else 0f)
-                                .setDuration(150)
-                                .start()
+                            contentRow.animate().translationX(if (shouldReveal) -revealedPx else 0f).setDuration(150).start()
                             dragging = false
                             return true
                         }
@@ -704,10 +653,8 @@ class DealerPanelActivity : AppCompatActivity() {
         }.apply {
             layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(8) }
         }
-
         frame.addView(deleteBg)
         frame.addView(contentRow)
-
         deleteBg.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Delete permanently?")
@@ -718,32 +665,22 @@ class DealerPanelActivity : AppCompatActivity() {
                 }
                 .show()
         }
-
         return frame
     }
 
-    /**
-     * NEW: a payment whose matching SMS was found, but that SMS is from
-     * an EARLIER day than today (only found because the match window
-     * was widened past "today"). Per policy, this is held — NOT
-     * auto-credited — and shown distinctly so the admin can look at the
-     * matched SMS text/date and manually confirm before any balance
-     * moves.
-     */
     private fun needsReviewRow(
         transactionId: String,
         dealerName: String,
         panel: String,
         amount: Double,
         tid: String,
-        document: com.google.firebase.firestore.DocumentSnapshot
+        document: DocumentSnapshot
     ): LinearLayout {
         val matchedSmsDate = document.getLong("matchedSmsDate")
         val matchedSmsBody = document.getString("matchedSmsBody") ?: ""
         val dateText = matchedSmsDate?.let {
-            java.text.SimpleDateFormat("dd MMM yyyy, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(it))
+            SimpleDateFormat("dd MMM yyyy, h:mm a", Locale.getDefault()).format(Date(it))
         } ?: "unknown date"
-
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -753,7 +690,7 @@ class DealerPanelActivity : AppCompatActivity() {
         row.addView(TextView(this).apply {
             text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
             textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTypeface(null, Typeface.BOLD)
             setTextColor(purple)
         })
         row.addView(TextView(this).apply {
@@ -782,10 +719,7 @@ class DealerPanelActivity : AppCompatActivity() {
         return row
     }
 
-    /** NEW: admin confirms an older-SMS match is genuinely valid — only
-     * then does it get credited via the same shared
-     * DealerPaymentVerifier used by the automatic (today-only) paths. */
-    private fun confirmNeedsReview(transactionId: String, document: com.google.firebase.firestore.DocumentSnapshot) {
+    private fun confirmNeedsReview(transactionId: String, document: DocumentSnapshot) {
         AlertDialog.Builder(this)
             .setTitle("Confirm this payment?")
             .setMessage("This will credit the dealer's balance based on the matched SMS shown. Only confirm if you've checked it's genuine.")
@@ -793,11 +727,7 @@ class DealerPanelActivity : AppCompatActivity() {
                 val data = document.data ?: return@setPositiveButton
                 DealerPaymentVerifier.verifyAndCredit(this, transactionId, data, "manual_confirm_needs_review") { success ->
                     runOnUiThread {
-                        Toast.makeText(
-                            this,
-                            if (success) "Confirmed and credited" else "Failed to confirm — try again",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, if (success) "Confirmed and credited" else "Failed to confirm — try again", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -823,7 +753,7 @@ class DealerPanelActivity : AppCompatActivity() {
             addView(TextView(this@DealerPanelActivity).apply {
                 text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
                 textSize = 13f
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
                 setTextColor(amberText)
             })
             addView(TextView(this@DealerPanelActivity).apply {
@@ -832,16 +762,6 @@ class DealerPanelActivity : AppCompatActivity() {
                 setTextColor(textMuted)
             })
         })
-        // NEW: per-payment retry button — the fallback for when live SMS
-        // auto-detection (DealerPaymentSmsReceiver) didn't fire in time
-        // (network delay, phone busy on a call, etc). Automatic
-        // detection stays the priority path; this just gives a direct,
-        // one-tap way to re-check THIS specific payment without having
-        // to scroll up to a separate global button. Re-scans the inbox
-        // (same underlying check as the global ⟳) — if this
-        // transaction's SMS is found now, it auto-verifies and
-        // auto-launches the panel transfer immediately, same as the
-        // live/automatic path.
         row.addView(TextView(this).apply {
             text = "🔄"
             textSize = 18f
@@ -851,11 +771,6 @@ class DealerPanelActivity : AppCompatActivity() {
         return row
     }
 
-    /** NEW: re-scans the SMS inbox, scoped conceptually to this one
-     * payment (the underlying scanner checks all PENDING transactions
-     * in one pass, which is safe and fast — only THIS one will actually
-     * change if its SMS is found). Shows a small per-tap status instead
-     * of the generic global scan message. */
     private fun retryMatchForOnePayment(transactionId: String) {
         Toast.makeText(this, "Checking for this payment's SMS…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
@@ -864,188 +779,83 @@ class DealerPanelActivity : AppCompatActivity() {
                 .addOnSuccessListener { doc ->
                     val stillPending = doc.getString("status") == "PENDING"
                     runOnUiThread {
-                        Toast.makeText(
-                            this@DealerPanelActivity,
-                            if (stillPending) "Still no matching SMS found for this payment." else "Matched! Processing…",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        Toast.makeText(this@DealerPanelActivity, if (stillPending) "Still no matching SMS found for this payment." else "Matched! Processing…", Toast.LENGTH_LONG).show()
                     }
                 }
         }
     }
 
-    private fun autoSendingRow(
-        dealerName: String,
-        panel: String,
-        amount: Double,
-        tid: String
-    ): LinearLayout {
-        val row = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = outlinedPill(
-                Color.parseColor("#E8F8EE"),
-                green,
-                12
-            )
-            layoutParams = LinearLayout.LayoutParams(-1, -2).also {
-                it.bottomMargin = dp(8)
-            }
-        }
-
-        row.addView(TextView(this).apply {
-            text = "✓"
-            textSize = 18f
-            setTextColor(green)
-            setPadding(0, 0, dp(10), 0)
-        })
-
-        row.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-
-            addView(TextView(this@DealerPanelActivity).apply {
-                text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
-                textSize = 13f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setTextColor(Color.parseColor("#18794E"))
-            })
-
-            addView(TextView(this@DealerPanelActivity).apply {
-                text = "TID: $tid  •  Verified — automatic transfer in progress"
-                textSize = 11f
-                setTextColor(textMuted)
-            })
-        })
-
-        return row
-    }
-
-    private fun autoFailedRow(
-        dealerName: String,
-        panel: String,
-        amount: Double,
-        tid: String,
-        error: String
-    ): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = outlinedPill(
-                Color.parseColor("#FEECEC"),
-                Color.parseColor("#D92D20"),
-                12
-            )
-            layoutParams = LinearLayout.LayoutParams(-1, -2).also {
-                it.bottomMargin = dp(8)
-            }
-        }
-
-        row.addView(TextView(this).apply {
-            text = "⚠ $dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#B42318"))
-        })
-
-        row.addView(TextView(this).apply {
-            text = if (error.isBlank()) {
-                "TID: $tid  •  Automatic transfer failed"
-            } else {
-                "TID: $tid  •  $error"
-            }
-            textSize = 11f
-            setTextColor(textMuted)
-            setPadding(0, dp(3), 0, 0)
-        })
-
-        return row
-    }
-
-    /** NEW: shown when the cross-app duplicate gate (PaymentClaimManager)
-     * rejected this dealer payment because the exact same TID/reference
-     * was already used elsewhere — either by a customer activating their
-     * package with it, or by this same dealer already. Shows exactly who
-     * used it first so the admin can confront the dealer/customer with
-     * proof instead of guessing. No balance was credited and no panel
-     * automation ran for this record. */
-    private fun duplicateRejectedRow(dealerName: String, panel: String, amount: Double, tid: String, message: String): LinearLayout {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            background = outlinedPill(
-                Color.parseColor("#FFF7E6"),
-                Color.parseColor("#B54708"),
-                12
-            )
-            layoutParams = LinearLayout.LayoutParams(-1, -2).also {
-                it.bottomMargin = dp(8)
-            }
-        }
-
-        row.addView(TextView(this).apply {
-            text = "⛔ $dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#B54708"))
-        })
-
-        row.addView(TextView(this).apply {
-            text = if (message.isBlank()) {
-                "TID: $tid  •  Rejected — this TID was already used elsewhere"
-            } else {
-                "TID: $tid  •  $message"
-            }
-            textSize = 11f
-            setTextColor(textMuted)
-            setPadding(0, dp(3), 0, 0)
-        })
-
-        return row
-    }
-
-    /** NEW: a payment already verified by SMS matching but not yet sent
-     * on the Ebone panel. Shows a "Send Now" button that opens
-     * SendDealerPaymentActivity pre-filled and locked to this dealer/
-     * panel/amount, so the admin only has to confirm — the actual
-     * amount/dealer can't be silently changed from what SMS verified. */
-    private fun sendNowRow(transactionId: String, dealerId: String, panel: String, amount: Double, tid: String): LinearLayout {
+    private fun autoSendingRow(dealerName: String, panel: String, amount: Double, tid: String): LinearLayout {
         val row = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
             background = outlinedPill(Color.parseColor("#E8F8EE"), green, 12)
             layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(8) }
         }
+        row.addView(TextView(this).apply {
+            text = "✓"
+            textSize = 18f
+            setTextColor(green)
+            setPadding(0, 0, dp(10), 0)
+        })
         row.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "$panel  —  Rs. ${"%.0f".format(amount)}"
+                text = "$dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
                 textSize = 13f
-                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor("#18794E"))
             })
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "TID: $tid  •  Verified — ready to send"
+                text = "TID: $tid  •  Verified — automatic transfer in progress"
                 textSize = 11f
                 setTextColor(textMuted)
             })
         })
-        row.addView(Button(this).apply {
-            text = "Send Now"
-            setBackgroundColor(green)
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            setPadding(dp(14), dp(6), dp(14), dp(6))
-            setOnClickListener {
-                val intent = Intent(this@DealerPanelActivity, SendDealerPaymentActivity::class.java).apply {
-                    putExtra("prefill_dealer_id", dealerId)
-                    putExtra("prefill_panel", panel)
-                    putExtra("prefill_amount", amount.toString())
-                    putExtra("prefill_transaction_id", transactionId)
-                }
-                startActivity(intent)
-            }
+        return row
+    }
+
+    private fun autoFailedRow(dealerName: String, panel: String, amount: Double, tid: String, error: String): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = outlinedPill(Color.parseColor("#FEECEC"), Color.parseColor("#D92D20"), 12)
+            layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(8) }
+        }
+        row.addView(TextView(this).apply {
+            text = "⚠ $dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#B42318"))
+        })
+        row.addView(TextView(this).apply {
+            text = if (error.isBlank()) "TID: $tid  •  Automatic transfer failed" else "TID: $tid  •  $error"
+            textSize = 11f
+            setTextColor(textMuted)
+            setPadding(0, dp(3), 0, 0)
+        })
+        return row
+    }
+
+    private fun duplicateRejectedRow(dealerName: String, panel: String, amount: Double, tid: String, message: String): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = outlinedPill(Color.parseColor("#FFF7E6"), Color.parseColor("#B54708"), 12)
+            layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(8) }
+        }
+        row.addView(TextView(this).apply {
+            text = "⛔ $dealerName  •  $panel  —  Rs. ${"%.0f".format(amount)}"
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#B54708"))
+        })
+        row.addView(TextView(this).apply {
+            text = if (message.isBlank()) "TID: $tid  •  Rejected — this TID was already used elsewhere" else "TID: $tid  •  $message"
+            textSize = 11f
+            setTextColor(textMuted)
+            setPadding(0, dp(3), 0, 0)
         })
         return row
     }
@@ -1060,12 +870,6 @@ class DealerPanelActivity : AppCompatActivity() {
 
     // ===================== ACTIONS =====================
 
-    /** NEW: debug-only — logs into the chosen panel with the tap
-     * inspector active, no auto-activate customer ID, so you can freely
-     * tap anywhere (dealer list, dropdown, balance display, submit
-     * button etc.) and see each element's tag/id/name/class in a Toast
-     * + Logcat. Purely for confirming selectors — does not touch any
-     * transaction or balance. */
     private fun inspectEbonePanel() {
         AlertDialog.Builder(this)
             .setTitle("Inspect which panel?")
@@ -1080,11 +884,6 @@ class DealerPanelActivity : AppCompatActivity() {
             .show()
     }
 
-    /** NEW: launches WebViewLoginActivity's FETCH_DEALER_ID flow for
-     * Wateen — searches the dealer list by [dealerName] and, on
-     * success, auto-fills [targetInput] with the numeric ID found. Lets
-     * the admin add a dealer's Wateen ID by name instead of having to
-     * find/type the internal numeric ID themselves. */
     private fun fetchWateenDealerId(targetInput: EditText, dealerName: String) {
         pendingFetchIdInput = targetInput
         val intent = Intent(this, WebViewLoginActivity::class.java).apply {
@@ -1108,26 +907,15 @@ class DealerPanelActivity : AppCompatActivity() {
             pendingFetchIdInput = null
         } else if (requestCode == REQUEST_CHECK_BALANCE) {
             if (isAutoUpdating) {
-                // Short delay to let the UI settle/Firestore update reflect
-                Handler(Looper.getMainLooper()).postDelayed({
-                    processNextAutoUpdate()
-                }, 1200)
+                Handler(Looper.getMainLooper()).postDelayed({ processNextAutoUpdate() }, 1200)
             }
         }
     }
 
-    /** NEW: opens the permanent Send Dealer Payment screen (blank —
-     * admin picks dealer/company/amount themselves). */
     private fun openSendPaymentScreen() {
         startActivity(Intent(this, SendDealerPaymentActivity::class.java))
     }
 
-    /** NEW: asks which panel to check, then triggers
-     * WebViewLoginActivity's CHECK_BALANCE flow — logs in, reads the
-     * franchise balance, saves it to franchiseSettings/balances, and
-     * fires a low-balance notification if under the configured
-     * threshold. Zong asks which zone too, since it's the only service
-     * currently running in more than one franchise (Okara + Renala). */
     private fun checkEboneBalance() {
         AlertDialog.Builder(this)
             .setTitle("Check balance for which panel?")
@@ -1148,7 +936,24 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun launchCheckBalance(isp: String, zone: String) {
-        val intent = Intent(this, WebViewLoginActivity::class.java).apply {
+        if (isBackgroundMode) {
+            showStatusNotification("Checking $isp Balance...", "$zone پینل سے بیلنس پڑھا جا رہا ہے")
+            BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
+                runOnUiThread {
+                    if (balance != null) {
+                        showStatusNotification("$isp Balance Updated", "نیا بیلنس: Rs. ${"%,.0f".format(balance)}")
+                        observeFranchiseBalances()
+                    } else {
+                        showStatusNotification("$isp Update Failed", "بیلنس چیک کرنے میں دشواری پیش آئی")
+                    }
+                    if (isAutoUpdating) processNextAutoUpdate()
+                }
+            }
+            return
+        }
+
+        val targetActivity = WebViewRouter.getTargetActivity(isp, zone)
+        val intent = Intent(this, targetActivity).apply {
             putExtra("selected_isp", isp)
             putExtra("manual_action", "CHECK_BALANCE")
             putExtra("target_zone", zone)
@@ -1160,146 +965,221 @@ class DealerPanelActivity : AppCompatActivity() {
         }
     }
 
+    private fun showStatusNotification(title: String, message: String) {
+        val channelId = "auto_update_status"
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (manager.getNotificationChannel(channelId) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(channelId, "Update Status", NotificationManager.IMPORTANCE_HIGH)
+                )
+            }
+        }
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.stat_notify_sync)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .build()
+        val notificationId = if (title.contains("Updated")) (System.currentTimeMillis().toInt()) else 7005
+        manager.notify(notificationId, notification)
+    }
+
     private fun startAutoUpdate() {
         if (isAutoUpdating) return
-        
         autoUpdateQueue.clear()
         autoUpdateQueue.add("EBONE" to "Okara")
         autoUpdateQueue.add("WATEEN" to "Okara")
         autoUpdateQueue.add("ZONG" to "Okara")
         autoUpdateQueue.add("ZONG" to "Renala")
-        
         isAutoUpdating = true
-        Toast.makeText(this, "Starting Auto Update for all panels...", Toast.LENGTH_SHORT).show()
+        observeFranchiseBalances()
+        if (isBackgroundMode) showStatusNotification("Auto Update Started", "تمام پینلز کا بیلنس بیک گراؤنڈ میں اپ ڈیٹ کیا جا رہا ہے")
+        Toast.makeText(this, "Starting Auto Update...", Toast.LENGTH_SHORT).show()
         processNextAutoUpdate()
     }
 
     private fun processNextAutoUpdate() {
         if (autoUpdateQueue.isEmpty()) {
             isAutoUpdating = false
+            observeFranchiseBalances()
+            if (isBackgroundMode) showStatusNotification("Auto Update Completed", "تمام پینلز کامیابی سے اپ ڈیٹ ہو گئے ہیں")
             Toast.makeText(this, "Auto Update completed!", Toast.LENGTH_LONG).show()
             return
         }
-        
         val next = autoUpdateQueue.removeAt(0)
         launchCheckBalance(next.first, next.second)
     }
 
-    /** NEW: live display of franchise-level balances (separate from any
-     * individual dealer's balance) — reads franchiseSettings/balances,
-     * updated whenever 💰 Check Balance successfully runs. Ebone/Wateen
-     * are Okara-only for now; Zong shows both Okara's and (once
-     * checked at least once) Renala's balance as separate chips, since
-     * Zong is the only service currently running in more than one zone. */
     private fun observeFranchiseBalances() {
         franchiseBalancesListener = db.collection("franchiseSettings").document("balances")
             .addSnapshotListener { snapshot, _ ->
-                franchiseBalancesRow.removeAllViews()
-                val ebone = snapshot?.getDouble("eboneBalance")
-                val wateen = snapshot?.getDouble("wateenBalance")
-                val zongOkara = snapshot?.getDouble("zongBalance")
-                // NEW: zone-suffixed field written by
-                // FranchiseBalanceManager for any zone other than Okara.
-                val zongRenala = snapshot?.getDouble("zongBalance_Renala")
-
-                franchiseBalancesRow.addView(franchiseBalanceChip("Ebone", ebone, orange))
-                franchiseBalancesRow.addView(franchiseBalanceChip("Wateen", wateen, navyMid))
-                franchiseBalancesRow.addView(franchiseBalanceChip("Zong (Okara)", zongOkara, purple))
-                // NEW: only show the Renala chip once it's actually been
-                // checked at least once — no point cluttering the row
-                // with an empty chip before Admin has ever pressed 💰
-                // for Renala.
-                if (zongRenala != null) {
-                    franchiseBalancesRow.addView(franchiseBalanceChip("Zong (Renala)", zongRenala, Color.parseColor("#7C3AED")))
+                if (snapshot == null || !snapshot.exists()) {
+                    franchiseBalancesRow.removeAllViews()
+                    franchiseBalancesRow.addView(emptyState("No balance data found"))
+                    franchiseBalancesRow.addView(autoUpdateChip())
+                    franchiseBalancesRow.addView(updateModeChip())
+                    return@addSnapshotListener
                 }
                 
-                // NEW: Auto Update button at the end of the scrollable row
+                franchiseBalancesRow.removeAllViews()
+                val ebone = snapshot.getDouble("eboneBalance")
+                val wateen = snapshot.getDouble("wateenBalance")
+                val zongOkara = snapshot.getDouble("zongBalance")
+                val zongRenala = snapshot.getDouble("zongBalance_Renala")
+                
+                val eboneTh = snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0
+                val wateenTh = snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0
+                val zongOkaraTh = snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0
+                val zongRenalaTh = snapshot.getDouble("zongLowBalanceThreshold_Renala") ?: 0.0
+
+                franchiseBalancesRow.addView(franchiseBalanceChip("Ebone", ebone, orange, "EBONE", "Okara", eboneTh))
+                franchiseBalancesRow.addView(franchiseBalanceChip("Wateen", wateen, navyMid, "WATEEN", "Okara", wateenTh))
+                franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zongOkara, purple, "ZONG", "Okara", zongOkaraTh))
+                if (zongRenala != null) {
+                    franchiseBalancesRow.addView(franchiseBalanceChip("Zong", zongRenala, Color.parseColor("#7C3AED"), "ZONG", "Renala", zongRenalaTh))
+                }
                 franchiseBalancesRow.addView(autoUpdateChip())
+                franchiseBalancesRow.addView(updateModeChip())
             }
     }
 
-    private fun franchiseBalanceChip(label: String, value: Double?, accent: Int): LinearLayout =
-        LinearLayout(this).apply {
+    private fun franchiseBalanceChip(label: String, value: Double?, accent: Int, isp: String = "", zone: String = "Okara", threshold: Double? = 0.0): LinearLayout {
+        // Use absolute value for comparison because some panels show negative balance for credit
+        val absValue = if (value != null) abs(value) else 0.0
+        val safeThreshold = threshold ?: 0.0
+        val isLow = value != null && safeThreshold > 0 && absValue < safeThreshold
+        val bgColor = if (isLow) Color.parseColor("#FEE2E2") else Color.parseColor("#F9FAFB")
+        val strokeColor = if (isLow) Color.parseColor("#EF4444") else borderLight
+        return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = outlinedPill(Color.parseColor("#F9FAFB"), borderLight, 10)
-            // NEW: fixed width instead of weight=1 — inside a
-            // HorizontalScrollView there's no bounded parent width for
-            // weight to distribute against, so weight-based chips would
-            // collapse. A fixed width also keeps every chip readable
-            // even when 4 are shown at once (Ebone/Wateen/Zong-Okara/
-            // Zong-Renala).
+            background = outlinedPill(bgColor, strokeColor, 10)
             layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
+            
+            val outValue = TypedValue()
+            context.theme.resolveAttribute(R.attr.selectableItemBackground, outValue, true)
+            foreground = AppCompatResources.getDrawable(context, outValue.resourceId)
+            isClickable = true
+            isFocusable = true
+            
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "$label\nFranchise"
+                text = "$label\n${if(zone == "Okara") "Franchise" else zone}"
                 textSize = 10f
-                setTextColor(accent)
-                setTypeface(null, android.graphics.Typeface.BOLD)
-            })
-            addView(TextView(this@DealerPanelActivity).apply {
-                text = if (value == null) "Not checked yet" else "Rs. ${"%,.0f".format(kotlin.math.abs(value))}"
-                textSize = 13f
-                setTextColor(textDark)
+                setTextColor(if (isLow) Color.parseColor("#B91C1C") else accent)
                 setTypeface(null, Typeface.BOLD)
             })
+            addView(TextView(this@DealerPanelActivity).apply {
+                val displayValue = if (value == null) "Not checked yet" else "Rs. ${"%,.0f".format(
+                    abs(value)
+                )}"
+                text = displayValue
+                textSize = 13f
+                setTextColor(if (isLow) Color.parseColor("#B91C1C") else textDark)
+                setTypeface(null, Typeface.BOLD)
+            })
+            setOnClickListener {
+                launchCheckBalance(isp, zone)
+                val status = if(isLow) "LOW" else "OK"
+                Toast.makeText(context, "$label $zone: Rs. ${absValue.toInt()} (Limit: ${safeThreshold.toInt()}) [$status]", Toast.LENGTH_SHORT).show()
+            }
         }
+    }
 
     private fun autoUpdateChip(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(8), dp(10), dp(8))
-            background = outlinedPill(Color.parseColor("#EEF2FF"), Color.parseColor("#4F46E5"), 10)
+            val bgColor = if (isAutoUpdating) Color.parseColor("#F5F3FF") else Color.parseColor("#EEF2FF")
+            val borderColor = if (isAutoUpdating) Color.parseColor("#7C3AED") else Color.parseColor("#4F46E5")
+            val textColor = if (isAutoUpdating) Color.parseColor("#7C3AED") else Color.parseColor("#4F46E5")
+            background = outlinedPill(bgColor, borderColor, 10)
             layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "⚡"
+                text = if (isAutoUpdating) "⌛" else "⚡"
                 textSize = 18f
             })
             addView(TextView(this@DealerPanelActivity).apply {
-                text = "Auto Update"
-                textSize = 11f
-                setTextColor(Color.parseColor("#4F46E5"))
+                text = if (isAutoUpdating) "Updating..." else "Auto Update"
+                textSize = 10f
+                setTextColor(textColor)
                 setTypeface(null, Typeface.BOLD)
             })
             setOnClickListener { startAutoUpdate() }
         }
 
-    /** NEW: admin-configurable low-balance notification thresholds, one
-     * per panel. Saved to franchiseSettings/balances
-     * (eboneLowBalanceThreshold / wateenLowBalanceThreshold /
-     * zongLowBalanceThreshold), read by FranchiseBalanceManager
-     * whenever a balance is checked. A threshold of 0 or blank means
-     * "no alert configured" for that panel. */
+    private fun updateModeChip(): LinearLayout {
+        val prefs = getSharedPreferences("dealer_panel_prefs", MODE_PRIVATE)
+        isBackgroundMode = prefs.getBoolean("is_background_mode", false)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            val bgColor = if (isBackgroundMode) Color.parseColor("#FDF2F2") else Color.parseColor("#ECFDF5")
+            val textColor = if (isBackgroundMode) Color.parseColor("#991B1B") else Color.parseColor("#065F46")
+            background = outlinedPill(bgColor, textColor, 10)
+            layoutParams = LinearLayout.LayoutParams(dp(120), -2).also { it.marginEnd = dp(8) }
+            val icon = TextView(this@DealerPanelActivity).apply {
+                text = if (isBackgroundMode) "👤" else "👁️"
+                textSize = 18f
+            }
+            val label = TextView(this@DealerPanelActivity).apply {
+                text = if (isBackgroundMode) "Background" else "WebView"
+                textSize = 10f
+                setTextColor(textColor)
+                setTypeface(null, Typeface.BOLD)
+            }
+            addView(icon)
+            addView(label)
+            setOnClickListener {
+                isBackgroundMode = !isBackgroundMode
+                prefs.edit().putBoolean("is_background_mode", isBackgroundMode).apply()
+                observeFranchiseBalances() 
+                val msg = if (isBackgroundMode) "Auto Update اب بیک گراؤنڈ میں چلے گا" else "Auto Update اب ویب ویو میں چلے گا"
+                Toast.makeText(this@DealerPanelActivity, msg, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     private fun showThresholdSettingsDialog() {
         val docRef = db.collection("franchiseSettings").document("balances")
         docRef.get().addOnSuccessListener { snapshot ->
             val eboneInput = EditText(this).apply {
-                hint = "Ebone low-balance alert (Rs.)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                hint = "Ebone (Okara) alert (Rs.)"
+                inputType = InputType.TYPE_CLASS_NUMBER
                 setText((snapshot.getDouble("eboneLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
             }
             val wateenInput = EditText(this).apply {
-                hint = "Wateen low-balance alert (Rs.)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                hint = "Wateen (Okara) alert (Rs.)"
+                inputType = InputType.TYPE_CLASS_NUMBER
                 setText((snapshot.getDouble("wateenLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
             }
-            val zongInput = EditText(this).apply {
-                hint = "Zong low-balance alert (Rs.)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            val zongOkaraInput = EditText(this).apply {
+                hint = "Zong (Okara) alert (Rs.)"
+                inputType = InputType.TYPE_CLASS_NUMBER
                 setText((snapshot.getDouble("zongLowBalanceThreshold") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
+            }
+            val zongRenalaInput = EditText(this).apply {
+                hint = "Zong (Renala) alert (Rs.)"
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText((snapshot.getDouble("zongLowBalanceThreshold_Renala") ?: 0.0).let { if (it > 0) it.toLong().toString() else "" })
             }
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(24), dp(8), dp(24), 0)
                 addView(TextView(this@DealerPanelActivity).apply {
-                    text = "You'll get a notification whenever a panel's balance drops below its number here."
+                    text = "Balance limits set karein. Jab balance is se kam hoga to chip red ho jayegi."
                     textSize = 12f
                     setTextColor(textMuted)
                     setPadding(0, 0, 0, dp(12))
                 })
                 addView(eboneInput)
                 addView(wateenInput)
-                addView(zongInput)
+                addView(zongOkaraInput)
+                addView(zongRenalaInput)
             }
 
             AlertDialog.Builder(this)
@@ -1309,48 +1189,30 @@ class DealerPanelActivity : AppCompatActivity() {
                     val updates = mapOf(
                         "eboneLowBalanceThreshold" to (eboneInput.text.toString().trim().toDoubleOrNull() ?: 0.0),
                         "wateenLowBalanceThreshold" to (wateenInput.text.toString().trim().toDoubleOrNull() ?: 0.0),
-                        "zongLowBalanceThreshold" to (zongInput.text.toString().trim().toDoubleOrNull() ?: 0.0)
+                        "zongLowBalanceThreshold" to (zongOkaraInput.text.toString().trim().toDoubleOrNull() ?: 0.0),
+                        "zongLowBalanceThreshold_Renala" to (zongRenalaInput.text.toString().trim().toDoubleOrNull() ?: 0.0)
                     )
-                    docRef.set(updates, com.google.firebase.firestore.SetOptions.merge())
+                    docRef.set(updates, SetOptions.merge())
                         .addOnSuccessListener { Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show() }
-                        .addOnFailureListener { e -> Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show() }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
         }
     }
 
-    /** NEW: per-zone (franchise) service toggles — e.g. Okara runs
-     * Ebone+Wateen+Zong, Renala only runs Zong right now. Writes to
-     * Firestore "zoneServiceConfig/{zone}" (eboneEnabled/
-     * wateenEnabled/zongEnabled booleans), read by the Dealer Panel app
-     * to grey out unavailable services for a dealer's zone. Missing
-     * doc/fields default to enabled=true — so nothing changes for a
-     * zone until Admin explicitly disables something there. */
     private fun showZoneServiceSettingsDialog() {
         AlertDialog.Builder(this)
             .setTitle("Which zone?")
-            .setItems(zoneNames.toTypedArray()) { _, which ->
-                showZoneServiceTogglesFor(zoneNames[which])
-            }
+            .setItems(zoneNames.toTypedArray()) { _, which -> showZoneServiceTogglesFor(zoneNames[which]) }
             .show()
     }
 
     private fun showZoneServiceTogglesFor(zone: String) {
         val docRef = db.collection("zoneServiceConfig").document(zone)
         docRef.get().addOnSuccessListener { snapshot ->
-            val eboneSwitch = Switch(this).apply {
-                text = "Ebone"
-                isChecked = snapshot.getBoolean("eboneEnabled") ?: true
-            }
-            val wateenSwitch = Switch(this).apply {
-                text = "Wateen"
-                isChecked = snapshot.getBoolean("wateenEnabled") ?: true
-            }
-            val zongSwitch = Switch(this).apply {
-                text = "Zong"
-                isChecked = snapshot.getBoolean("zongEnabled") ?: true
-            }
+            val eboneSwitch = Switch(this).apply { text = "Ebone"; isChecked = snapshot.getBoolean("eboneEnabled") ?: true }
+            val wateenSwitch = Switch(this).apply { text = "Wateen"; isChecked = snapshot.getBoolean("wateenEnabled") ?: true }
+            val zongSwitch = Switch(this).apply { text = "Zong"; isChecked = snapshot.getBoolean("zongEnabled") ?: true }
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(24), dp(8), dp(24), 0)
@@ -1360,51 +1222,29 @@ class DealerPanelActivity : AppCompatActivity() {
                     setTextColor(textMuted)
                     setPadding(0, 0, 0, dp(12))
                 })
-                addView(eboneSwitch)
-                addView(wateenSwitch)
-                addView(zongSwitch)
+                addView(eboneSwitch); addView(wateenSwitch); addView(zongSwitch)
             }
-
             AlertDialog.Builder(this)
                 .setTitle("$zone — Enabled Services")
                 .setView(box)
                 .setPositiveButton("Save") { _, _ ->
-                    docRef.set(
-                        mapOf(
-                            "eboneEnabled" to eboneSwitch.isChecked,
-                            "wateenEnabled" to wateenSwitch.isChecked,
-                            "zongEnabled" to zongSwitch.isChecked
-                        ),
-                        com.google.firebase.firestore.SetOptions.merge()
-                    )
+                    docRef.set(mapOf("eboneEnabled" to eboneSwitch.isChecked, "wateenEnabled" to wateenSwitch.isChecked, "zongEnabled" to zongSwitch.isChecked), SetOptions.merge())
                         .addOnSuccessListener { Toast.makeText(this, "$zone services updated", Toast.LENGTH_SHORT).show() }
                         .addOnFailureListener { e -> Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show() }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
-        }.addOnFailureListener { e ->
-            Toast.makeText(this, "Could not load $zone settings: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        }.addOnFailureListener { e -> Toast.makeText(this, "Could not load $zone settings: ${e.message}", Toast.LENGTH_LONG).show() }
     }
 
     private fun scanNow() {
         Toast.makeText(this, "Scanning SMS inbox for dealer payments…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch(Dispatchers.IO) {
             val matched = DealerPaymentSmsScanner.scanAllPending(this@DealerPanelActivity, "manual_scan_now_button")
-            runOnUiThread {
-                Toast.makeText(
-                    this@DealerPanelActivity,
-                    if (matched > 0) "Matched $matched payment(s)" else "No new matches found",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+            runOnUiThread { Toast.makeText(this@DealerPanelActivity, if (matched > 0) "Matched $matched payment(s)" else "No new matches found", Toast.LENGTH_LONG).show() }
         }
     }
 
-    // NEW: known zones/franchises. Each has its own Franchise login per
-    // ISP (set in ISP Panel Settings) and its own enabled-services list
-    // (set via Zone Service Settings). Add more names here as new
-    // franchises come online.
     private val zoneNames = listOf("Okara", "Renala")
 
     private fun showAddDealerDialog() {
@@ -1414,176 +1254,57 @@ class DealerPanelActivity : AppCompatActivity() {
         val wateenIdInput = EditText(this).apply { hint = "Wateen Panel Dealer ID" }
         val zongIdInput = EditText(this).apply { hint = "Zong Panel Dealer ID" }
         val code = (100000..999999).random().toString()
-
-        // NEW: Zone tag — determines which franchise login (Okara's
-        // Abbas046 vs Renala's RN-Abbas046) and which enabled-services
-        // list this dealer follows. Defaults to "Okara" so existing
-        // dealers/behaviour are unaffected until explicitly changed.
-        val zoneSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(this@DealerPanelActivity, android.R.layout.simple_spinner_dropdown_item, zoneNames)
-        }
-
+        val zoneSpinner = Spinner(this).apply { adapter = ArrayAdapter(this@DealerPanelActivity, android.R.layout.simple_spinner_dropdown_item, zoneNames) }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(8), dp(24), 0)
-            addView(nameInput)
-            addView(mobileInput)
-            addView(TextView(this@DealerPanelActivity).apply {
-                text = "Zone (Franchise Tag)"
-                textSize = 12f
-                setTextColor(textMuted)
-                setPadding(0, dp(14), 0, dp(4))
-            })
+            addView(nameInput); addView(mobileInput)
+            addView(TextView(this@DealerPanelActivity).apply { text = "Zone (Franchise Tag)"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(14), 0, dp(4)) })
             addView(zoneSpinner)
-            addView(TextView(this@DealerPanelActivity).apply {
-                text = "ISP Panel Dealer IDs (leave blank if not known yet)"
-                textSize = 12f
-                setTextColor(textMuted)
-                setPadding(0, dp(14), 0, dp(4))
-            })
+            addView(TextView(this@DealerPanelActivity).apply { text = "ISP Panel Dealer IDs (leave blank if not known yet)"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(14), 0, dp(4)) })
             addView(eboneIdInput)
-            // NEW: "Fetch" button — searches Wateen's dealer list by the
-            // name typed above and auto-fills the numeric ID, so the
-            // admin never has to manually find/type Wateen's internal
-            // numeric dealer ID (e.g. 2146).
             addView(LinearLayout(this@DealerPanelActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(wateenIdInput.also {
-                    it.layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-                })
-                addView(Button(this@DealerPanelActivity).apply {
-                    text = "🔎 Fetch"
-                    textSize = 12f
-                    setOnClickListener {
-                        val name = nameInput.text.toString().trim()
-                        if (name.isEmpty()) {
-                            Toast.makeText(this@DealerPanelActivity, "Type the dealer's name first", Toast.LENGTH_SHORT).show()
-                        } else {
-                            fetchWateenDealerId(wateenIdInput, name)
-                        }
-                    }
-                })
+                addView(wateenIdInput.also { it.layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
+                addView(Button(this@DealerPanelActivity).apply { text = "🔎 Fetch"; textSize = 12f; setOnClickListener {
+                    val name = nameInput.text.toString().trim()
+                    if (name.isEmpty()) Toast.makeText(this@DealerPanelActivity, "Type the dealer's name first", Toast.LENGTH_SHORT).show()
+                    else fetchWateenDealerId(wateenIdInput, name)
+                }})
             })
             addView(zongIdInput)
-            addView(TextView(this@DealerPanelActivity).apply {
-                text = "Code: $code"
-                textSize = 22f
-                setPadding(0, dp(16), 0, 0)
-            })
+            addView(TextView(this@DealerPanelActivity).apply { text = "Code: $code"; textSize = 22f; setPadding(0, dp(16), 0, 0) })
         }
-
-        AlertDialog.Builder(this)
-            .setTitle("Add Dealer")
-            .setView(box)
-            .setPositiveButton("Create") { _, _ ->
-                val name = nameInput.text.toString().trim()
-                val mobile = mobileInput.text.toString().trim()
-                if (name.isEmpty() || mobile.isEmpty()) {
-                    Toast.makeText(this, "Dealer name and mobile are required", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                val zone = zoneNames[zoneSpinner.selectedItemPosition]
-
-                val dealerId = db.collection("dealers").document().id
-                val dealer = mapOf(
-                    "dealerId" to dealerId,
-                    "name" to name,
-                    "mobile" to mobile,
-                    "dealerCode" to code,
-                    "deviceId" to "",
-                    "status" to "ACTIVE",
-                    "zone" to zone,
-                    "wateenBalance" to 0.0,
-                    "eboneBalance" to 0.0,
-                    "zongBalance" to 0.0,
-                    "eboneDealerId" to eboneIdInput.text.toString().trim(),
-                    "wateenDealerId" to wateenIdInput.text.toString().trim(),
-                    "zongDealerId" to zongIdInput.text.toString().trim(),
-                    "paymentAccounts" to paymentAccountNames.associateWith { true },
-                    "createdAt" to System.currentTimeMillis()
-                )
-
-                db.collection("dealers").document(dealerId).set(dealer)
-                    .addOnSuccessListener {
-                        Toast.makeText(this, "Dealer created. Code: $code", Toast.LENGTH_LONG).show()
-                    }
-                    .addOnFailureListener { error ->
-                        Toast.makeText(this, "Dealer creation failed: ${error.message}", Toast.LENGTH_LONG).show()
-                    }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        AlertDialog.Builder(this).setTitle("Add Dealer").setView(box).setPositiveButton("Create") { _, _ ->
+            val name = nameInput.text.toString().trim()
+            val mobile = mobileInput.text.toString().trim()
+            if (name.isEmpty() || mobile.isEmpty()) { Toast.makeText(this, "Dealer name and mobile are required", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+            val zone = zoneNames[zoneSpinner.selectedItemPosition]
+            val dealerId = db.collection("dealers").document().id
+            val dealer = mapOf("dealerId" to dealerId, "name" to name, "mobile" to mobile, "dealerCode" to code, "deviceId" to "", "status" to "ACTIVE", "zone" to zone, "wateenBalance" to 0.0, "eboneBalance" to 0.0, "zongBalance" to 0.0, "eboneDealerId" to eboneIdInput.text.toString().trim(), "wateenDealerId" to wateenIdInput.text.toString().trim(), "zongDealerId" to zongIdInput.text.toString().trim(), "paymentAccounts" to paymentAccountNames.associateWith { true }, "createdAt" to System.currentTimeMillis())
+            db.collection("dealers").document(dealerId).set(dealer).addOnSuccessListener { Toast.makeText(this, "Dealer created. Code: $code", Toast.LENGTH_LONG).show() }.addOnFailureListener { error -> Toast.makeText(this, "Dealer creation failed: ${error.message}", Toast.LENGTH_LONG).show() }
+        }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showDealerDetails(dealerId: String) {
-        db.collection("dealers").document(dealerId).get()
-            .addOnSuccessListener { document ->
-                if (!document.exists()) return@addOnSuccessListener
-
-                val box = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(20), 0, dp(20), 0)
-                }
-
-                val activeSwitch = Switch(this).apply {
-                    text = "Dealer Active"
-                    isChecked = (document.getString("status") ?: "ACTIVE") == "ACTIVE"
-                }
-                box.addView(activeSwitch)
-
-                // NEW: Zone (Franchise Tag) — lets Admin assign/change
-                // which zone this dealer belongs to (e.g. tag an
-                // existing dealer as "Renala" instead of the default
-                // "Okara"). Determines which franchise login and
-                // enabled-services list this dealer follows.
-                box.addView(TextView(this@DealerPanelActivity).apply {
-                    text = "Zone (Franchise Tag)"
-                    textSize = 12f
-                    setTextColor(textMuted)
-                    setPadding(0, dp(10), 0, dp(4))
-                })
-                val currentZone = document.getString("zone")?.ifBlank { null } ?: "Okara"
-                val zoneSpinner = Spinner(this).apply {
-                    adapter = ArrayAdapter(this@DealerPanelActivity, android.R.layout.simple_spinner_dropdown_item, zoneNames)
-                    setSelection(zoneNames.indexOf(currentZone).coerceAtLeast(0))
-                }
-                box.addView(zoneSpinner)
-
-                val savedAccounts = document.get("paymentAccounts") as? Map<*, *> ?: emptyMap<Any, Any>()
-                val switches = mutableMapOf<String, Switch>()
-                paymentAccountNames.forEach { accountName ->
-                    val accountSwitch = Switch(this).apply {
-                        text = accountName
-                        isChecked = savedAccounts[accountName] != false
-                    }
-                    switches[accountName] = accountSwitch
-                    box.addView(accountSwitch)
-                }
-
-                AlertDialog.Builder(this)
-                    .setTitle("Dealer Settings")
-                    .setView(box)
-                    .setPositiveButton("Save") { _, _ ->
-                        val accountStates = switches.mapValues { it.value.isChecked }
-                        val selectedZone = zoneNames[zoneSpinner.selectedItemPosition]
-                        db.collection("dealers").document(dealerId)
-                            .update(
-                                mapOf(
-                                    "status" to if (activeSwitch.isChecked) "ACTIVE" else "DISABLED",
-                                    "zone" to selectedZone,
-                                    "paymentAccounts" to accountStates
-                                )
-                            )
-                            .addOnFailureListener { error ->
-                                Toast.makeText(this, "Save failed: ${error.message}", Toast.LENGTH_LONG).show()
-                            }
-                    }
-                    .setNegativeButton("Close", null)
-                    .show()
-            }
-            .addOnFailureListener { error ->
-                Toast.makeText(this, "Dealer details load failed: ${error.message}", Toast.LENGTH_LONG).show()
-            }
+        db.collection("dealers").document(dealerId).get().addOnSuccessListener { document ->
+            if (!document.exists()) return@addOnSuccessListener
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+            val activeSwitch = Switch(this).apply { text = "Dealer Active"; isChecked = (document.getString("status") ?: "ACTIVE") == "ACTIVE" }
+            box.addView(activeSwitch)
+            box.addView(TextView(this@DealerPanelActivity).apply { text = "Zone (Franchise Tag)"; textSize = 12f; setTextColor(textMuted); setPadding(0, dp(10), 0, dp(4)) })
+            val currentZone = document.getString("zone")?.ifBlank { null } ?: "Okara"
+            val zoneSpinner = Spinner(this).apply { adapter = ArrayAdapter(this@DealerPanelActivity, R.layout.simple_spinner_dropdown_item, zoneNames); setSelection(zoneNames.indexOf(currentZone).coerceAtLeast(0)) }
+            box.addView(zoneSpinner)
+            val savedAccounts = document.get("paymentAccounts") as? Map<*, *> ?: emptyMap<Any, Any>()
+            val switches = mutableMapOf<String, Switch>()
+            paymentAccountNames.forEach { accountName -> val accountSwitch = Switch(this).apply { text = accountName; isChecked = savedAccounts[accountName] != false }; switches[accountName] = accountSwitch; box.addView(accountSwitch) }
+            AlertDialog.Builder(this).setTitle("Dealer Settings").setView(box).setPositiveButton("Save") { _, _ ->
+                val accountStates = switches.mapValues { it.value.isChecked }
+                val selectedZone = zoneNames[zoneSpinner.selectedItemPosition]
+                db.collection("dealers").document(dealerId).update(mapOf("status" to if (activeSwitch.isChecked) "ACTIVE" else "DISABLED", "zone" to selectedZone, "paymentAccounts" to accountStates)).addOnFailureListener { error -> Toast.makeText(this, "Save failed: ${error.message}", Toast.LENGTH_LONG).show() }
+            }.setNegativeButton("Close", null).show()
+        }.addOnFailureListener { error -> Toast.makeText(this, "Dealer details load failed: ${error.message}", Toast.LENGTH_LONG).show() }
     }
 }
