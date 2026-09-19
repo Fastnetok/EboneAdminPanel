@@ -95,6 +95,7 @@ object BackgroundBalanceUpdater {
             webView.webViewClient = object : WebViewClient() {
                 var loginAttempted = false
                 var balanceReadAttempted = false
+                var readRetryCount = 0
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     if (isFinished || url == null) return
@@ -136,14 +137,27 @@ object BackgroundBalanceUpdater {
                         if (!balanceReadAttempted) {
                             readBalance(isp, zone, webView) { balance ->
                                 if (balance != null) {
+                                    balanceReadAttempted = true
                                     isFinished = true
                                     handler.removeCallbacks(timeoutRunnable)
                                     webView.destroy()
                                     onComplete(balance)
                                 } else {
-                                    // Maybe retry or navigate
-                                    if (isp.uppercase() == "WATEEN" && !url.contains("accounting/mybalance")) {
-                                        webView.loadUrl("https://panel.wateen.com/")
+                                    // Retry logic for dynamic rendering
+                                    if (readRetryCount < 8) {
+                                        readRetryCount++
+                                        Log.d(TAG, "Balance not found, retry $readRetryCount for $isp")
+                                        handler.postDelayed({
+                                            if (!isFinished) onPageFinished(webView, webView.url)
+                                        }, 1500)
+                                    } else {
+                                        // Final attempt failed
+                                        if (isp.uppercase() == "WATEEN" && !url.contains("accounting/mybalance")) {
+                                            webView.loadUrl("https://panel.wateen.com/")
+                                        } else {
+                                            // Exhausted retries
+                                            Log.e(TAG, "Exhausted retries for $isp balance check")
+                                        }
                                     }
                                 }
                             }
@@ -174,8 +188,17 @@ object BackgroundBalanceUpdater {
             "WATEEN" -> """
                 (function(){
                     var body = document.body.innerText || '';
-                    var m = body.match(/My\s+Balance[\s\S]{0,120}?([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
-                    return m ? m[1] : null;
+                    var m = body.match(/My\s+Balance[\s\S]{0,150}?([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i);
+                    if(m) return m[1];
+                    
+                    var valEl = document.querySelector('a[href*="accounting/mybalance"] span.h2') || 
+                               document.querySelector('.card-stats span.h2') ||
+                               document.querySelector('.card span.h2');
+                    if(valEl) {
+                        var v = (valEl.innerText || valEl.textContent || '').trim();
+                        if(v && /[0-9]/.test(v)) return v;
+                    }
+                    return null;
                 })()
             """.trimIndent()
             "ZONG" -> """

@@ -55,6 +55,13 @@ class AddComplaintActivity : AppCompatActivity() {
                     val targetActivity = WebViewRouter.getTargetActivity(selectedISP, null)
                     val intent = Intent(this, targetActivity)
                     intent.putExtra("selected_isp", selectedISP)
+                    
+                    // NEW: Pass existing User ID if present so WebView can auto-search
+                    val currentId = userIdInput.text.toString().trim()
+                    if (currentId.isNotEmpty()) {
+                        intent.putExtra("auto_activate_customer_id", currentId)
+                    }
+                    
                     webViewLauncher.launch(intent)
                 }
                 .setNegativeButton("Cancel", null)

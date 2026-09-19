@@ -982,14 +982,7 @@ class WateenWebViewActivity : AppCompatActivity() {
                     "transferredAt" to System.currentTimeMillis(),
                     "transferResultText" to clean.take(500)
                 )).addOnCompleteListener {
-                    manualAction = null
-                    setResult(RESULT_OK, Intent().apply {
-                        putExtra("dealer_topup_submitted", true)
-                        putExtra("sms_payment_completed", true)
-                        putExtra("source_transaction_id", smsId)
-                        putExtra("manual_action_success", true)
-                    })
-                    finish()
+                    continueAfterDealerTopupSuccess()
                 }
             } else {
                 setResult(RESULT_OK, Intent().apply { 
@@ -1020,6 +1013,7 @@ class WateenWebViewActivity : AppCompatActivity() {
             if (balance != null) {
                 Log.d(TAG, "Franchise balance found: $balance")
                 FranchiseBalanceManager.updateBalance("WATEEN", balance, targetZone) {
+                    FranchiseBalanceManager.showUpdateNotification(this, "WATEEN", balance, targetZone)
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "WATEEN", balance, targetZone)
                 }
                 setResult(RESULT_OK, Intent().apply { 

@@ -13,6 +13,8 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 
+private const val ALL_EMPLOYEES_REPORT_MARKER = "ALL"
+
 class ReportsActivity : AppCompatActivity() {
 
     private lateinit var recyclerView: RecyclerView
@@ -46,7 +48,7 @@ class ReportsActivity : AppCompatActivity() {
         adapter = ReportAdapter(reportList) {
             // Header "REPEAT COMPLAINTS" box clicked -> show full repeat list across ALL employees
             val intent = Intent(this, EmployeeReportDetailsActivity::class.java)
-            intent.putExtra("employeeName", ALL_EMPLOYEES_MARKER)
+            intent.putExtra("employeeName", ALL_EMPLOYEES_REPORT_MARKER)
             intent.putExtra("showRepeat", true)
             startActivity(intent)
         }
@@ -136,33 +138,14 @@ class ReportsActivity : AppCompatActivity() {
         popup.show()
     }
 
-    // MONTHLY REPORTS — current year + future years only
+    // MONTHLY REPORTS — always open the current calendar month directly.
     private fun showMonthSelector() {
 
         val currentCalendar = java.util.Calendar.getInstance()
         val currentYear = currentCalendar.get(java.util.Calendar.YEAR)
         val currentMonth = currentCalendar.get(java.util.Calendar.MONTH)
 
-        val years = mutableListOf<String>()
-        val yearValues = mutableListOf<Int>()
-
-        // Only current year and future years are offered.
-        for (year in currentYear..(currentYear + 5)) {
-            years.add(year.toString())
-            yearValues.add(year)
-        }
-
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Select Year")
-            .setItems(years.toTypedArray()) { _, which ->
-                val selectedYear = yearValues[which]
-                showMonthSelectorForYear(
-                    selectedYear,
-                    currentYear,
-                    currentMonth
-                )
-            }
-            .show()
+        loadCalendarMonthReport(currentYear, currentMonth)
     }
 
     private fun showMonthSelectorForYear(

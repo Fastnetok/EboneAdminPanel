@@ -660,7 +660,10 @@ class EboneWebViewActivity : AppCompatActivity() {
                 if (text.isNotBlank()) {
                     val balance = Regex("Balance:\\s*(-?[0-9.,]+)").find(text)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
                     if (balance != null) {
-                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone) }
+                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { 
+                            FranchiseBalanceManager.showUpdateNotification(this, "EBONE", balance, targetZone)
+                            FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone) 
+                        }
                         setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
                         webView.postDelayed({ finish() }, 500)
                         return@evaluateJavascript

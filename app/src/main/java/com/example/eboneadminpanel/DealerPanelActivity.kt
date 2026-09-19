@@ -1,6 +1,7 @@
 package com.example.eboneadminpanel
 
 import android.R
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -8,10 +9,12 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
@@ -52,6 +55,7 @@ class DealerPanelActivity : AppCompatActivity() {
 
     private var dealerCount = 0
     private var totalBalance = 0.0
+    private var activeStatFilter: String? = null // NEW: tracks which top card is selected
 
     private val dealerNameCache = HashMap<String, String>()
 
@@ -285,30 +289,51 @@ class DealerPanelActivity : AppCompatActivity() {
         setOnClickListener { onClick() }
     }
 
+    private var statsContainer: LinearLayout? = null
+    
     private fun buildStatsRow(): LinearLayout {
+        val container = LinearLayout(this).apply {
+            id = View.generateViewId()
+            statsContainer = this
+            orientation = LinearLayout.VERTICAL
+        }
+        container.addView(buildStatsCards())
+        return container
+    }
+
+    private fun buildStatsCards(): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(16), dp(16), dp(16), dp(4))
         }
 
-        fun statCard(label: String, colorAccent: Int): Pair<LinearLayout, TextView> {
+        fun statCard(label: String, colorAccent: Int, type: String): Pair<LinearLayout, TextView> {
             val valueText = TextView(this).apply {
                 textSize = 20f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(textDark)
             }
+            
+            val isSelected = activeStatFilter == type
+            
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(12), dp(14), dp(12))
-                background = GradientDrawable().apply {
-                    setColor(cardWhite)
-                    cornerRadius = dp(14).toFloat()
-                    setStroke(dp(1), borderLight)
-                }
-                elevation = dp(1).toFloat()
+                background = outlinedPill(
+                    if (isSelected) Color.parseColor("#EFF6FF") else cardWhite, 
+                    if (isSelected) Color.parseColor("#2563EB") else borderLight, 
+                    14
+                )
+                elevation = if(isSelected) dp(4).toFloat() else dp(1).toFloat()
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f).also {
                     it.marginEnd = dp(8)
                 }
+                
+                val outValue = TypedValue()
+                context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+                foreground = AppCompatResources.getDrawable(context, outValue.resourceId)
+                isClickable = true
+
                 addView(View(this@DealerPanelActivity).apply {
                     layoutParams = LinearLayout.LayoutParams(dp(24), dp(4)).also { it.bottomMargin = dp(8) }
                     background = pill(colorAccent, 4)
@@ -319,13 +344,18 @@ class DealerPanelActivity : AppCompatActivity() {
                     textSize = 11f
                     setTextColor(textMuted)
                 })
+                
+                setOnClickListener {
+                    activeStatFilter = if (activeStatFilter == type) null else type
+                    refreshStatsRow()
+                }
             }
             return card to valueText
         }
 
-        val (dealersCard, dealersVal) = statCard("Dealers", navyMid)
-        val (pendingCard, pendingVal) = statCard("Pending", orange)
-        val (balanceCard, balanceVal) = statCard("Total Balance", green)
+        val (dealersCard, dealersVal) = statCard("Dealers", navyMid, "DEALERS")
+        val (pendingCard, pendingVal) = statCard("Pending", orange, "PENDING")
+        val (balanceCard, balanceVal) = statCard("Total Balance", green, "TOTAL")
 
         statDealersText = dealersVal
         statPendingText = pendingVal
@@ -336,6 +366,16 @@ class DealerPanelActivity : AppCompatActivity() {
         balanceCard.layoutParams = (balanceCard.layoutParams as LinearLayout.LayoutParams).also { it.marginEnd = 0 }
         row.addView(balanceCard)
         return row
+    }
+
+    private fun refreshStatsRow() {
+        statsContainer?.let {
+            it.removeAllViews()
+            it.addView(buildStatsCards())
+            // Also refresh lists based on selection
+            observeDealers()
+            observePending()
+        }
     }
 
     private fun sectionTitle(text: String): TextView = TextView(this).apply {
@@ -365,6 +405,7 @@ class DealerPanelActivity : AppCompatActivity() {
                     dealerList.addView(emptyState("No dealers yet — tap + to add one"))
                 }
 
+                var index = 1
                 query.documents.forEach { document ->
                     val name = document.getString("name") ?: ""
                     if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {
@@ -376,7 +417,7 @@ class DealerPanelActivity : AppCompatActivity() {
                     val zong = document.getDouble("zongBalance") ?: 0.0
                     totalBalance += wateen + ebone + zong
                     dealerNameCache[document.id] = document.getString("name") ?: document.id
-                    dealerList.addView(dealerCard(document.id, document))
+                    dealerList.addView(dealerCard(document.id, document, index++))
                 }
 
                 statDealersText.text = dealerCount.toString()
@@ -384,7 +425,7 @@ class DealerPanelActivity : AppCompatActivity() {
             }
     }
 
-    private fun dealerCard(dealerId: String, document: DocumentSnapshot): LinearLayout {
+    private fun dealerCard(dealerId: String, document: DocumentSnapshot, index: Int): LinearLayout {
         val wateen = document.getDouble("wateenBalance") ?: 0.0
         val ebone = document.getDouble("eboneBalance") ?: 0.0
         val zong = document.getDouble("zongBalance") ?: 0.0
@@ -941,8 +982,10 @@ class DealerPanelActivity : AppCompatActivity() {
             BackgroundBalanceUpdater.checkBalance(this, isp, zone) { balance ->
                 runOnUiThread {
                     if (balance != null) {
-                        showStatusNotification("$isp Balance Updated", "نیا بیلنس: Rs. ${"%,.0f".format(balance)}")
-                        observeFranchiseBalances()
+                        // SAVE balance to Firebase so chips update
+                        FranchiseBalanceManager.updateBalance(isp, balance, zone) {
+                            FranchiseBalanceManager.showUpdateNotification(this, isp, balance, zone)
+                        }
                     } else {
                         showStatusNotification("$isp Update Failed", "بیلنس چیک کرنے میں دشواری پیش آئی")
                     }
@@ -966,23 +1009,37 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun showStatusNotification(title: String, message: String) {
-        val channelId = "auto_update_status"
+        val channelId = "auto_update_status_v4" // Fresh channel to ensure all settings (sound, priority) are applied
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (manager.getNotificationChannel(channelId) == null) {
-                manager.createNotificationChannel(
-                    NotificationChannel(channelId, "Update Status", NotificationManager.IMPORTANCE_HIGH)
-                )
+            val channel = NotificationChannel(channelId, "Update Status", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Panel updates and balance alerts"
+                enableLights(true)
+                lightColor = Color.GREEN
+                enableVibration(true)
+                setBypassDnd(true)
+                setSound(
+                    Settings.System.DEFAULT_NOTIFICATION_URI, AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build())
             }
+            manager.createNotificationChannel(channel)
         }
+
         val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.stat_notify_sync)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle(title)
             .setContentText(message)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setSound(Settings.System.DEFAULT_NOTIFICATION_URI)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVibrate(longArrayOf(0, 1000, 200, 1000))
             .setAutoCancel(true)
             .build()
+            
         val notificationId = if (title.contains("Updated")) (System.currentTimeMillis().toInt()) else 7005
         manager.notify(notificationId, notification)
     }
@@ -1060,7 +1117,7 @@ class DealerPanelActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(125), -2).also { it.marginEnd = dp(8) }
             
             val outValue = TypedValue()
-            context.theme.resolveAttribute(R.attr.selectableItemBackground, outValue, true)
+            context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
             foreground = AppCompatResources.getDrawable(context, outValue.resourceId)
             isClickable = true
             isFocusable = true

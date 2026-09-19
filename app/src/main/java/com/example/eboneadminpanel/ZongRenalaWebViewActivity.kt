@@ -499,6 +499,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             if (balance != null) {
                 Log.d("ZongRenalaWebView", "Found balance: $balance")
                 FranchiseBalanceManager.updateBalance("ZONG", balance, ZONE) {
+                    FranchiseBalanceManager.showUpdateNotification(this, "ZONG", balance, ZONE)
                     FranchiseBalanceManager.checkAndNotifyLowBalance(this, "ZONG", balance, ZONE)
                     setResult(RESULT_OK, Intent().apply {
                         putExtra("checked_balance", balance)

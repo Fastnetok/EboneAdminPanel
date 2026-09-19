@@ -34,6 +34,31 @@ class IspPanelSettingsActivity : AppCompatActivity() {
          * existing accounts. */
         private fun accountZone(obj: JSONObject): String = obj.optString("zone", "Okara").ifBlank { "Okara" }
 
+        /*
+         * New Complaints opens the Zong Okara flow. When more than one
+         * Zong/Okara franchise account exists, Abbas 04-6 is the account
+         * explicitly assigned to that flow. The stored password is still
+         * read from this same existing account; no account data is changed.
+         */
+        private const val ZONG_OKARA_COMPLAINT_ACCOUNT = "ABBAS046"
+
+        private fun normalizedUsername(value: String): String =
+            value.uppercase().filter { it.isLetterOrDigit() }
+
+        private fun preferredZongOkaraComplaintAccount(arr: JSONArray): JSONObject? {
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
+                    val isOkara = accountZone(obj).equals("Okara", ignoreCase = true)
+                    val isFranchiseAccount = !obj.optBoolean("isDealer", false)
+                    val isAbbas046 = normalizedUsername(obj.optString("username")) == ZONG_OKARA_COMPLAINT_ACCOUNT
+                    if (isZong && isOkara && isFranchiseAccount && isAbbas046) return obj
+                } catch (_: Exception) { }
+            }
+            return null
+        }
+
         /**
          * NEW: zone-aware lookup — [zone] defaults to "Okara" for any
          * caller that hasn't been updated to pass a real zone yet.
@@ -65,67 +90,94 @@ class IspPanelSettingsActivity : AppCompatActivity() {
          */
         fun getSavedUsername(context: Context, isp: String, zone: String = "Okara"): String? {
             val arr = safeAccountsArray(context) ?: return null
-            // Pass 1: non-dealer, exact isp+zone match
+
+            if (isp.equals("ZONG", ignoreCase = true) && zone.equals("Okara", ignoreCase = true)) {
+                preferredZongOkaraComplaintAccount(arr)?.let { return it.optString("username") }
+            }
+            
+            // Pass 1: Non-dealer, exact ISP + exact Zone match (case-insensitive)
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false) && accountZone(obj) == zone) {
+                    if (obj.getString("isp") == isp && 
+                        !obj.optBoolean("isDealer", false) && 
+                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
                         return obj.getString("username")
                     }
-                } catch (_: Exception) { /* skip this one malformed entry, keep scanning */ }
+                } catch (_: Exception) { }
             }
-            // Pass 2: dealer account, exact isp+zone match
-            for (i in 0 until arr.length()) {
-                try {
-                    val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && accountZone(obj) == zone) {
-                        return obj.getString("username")
-                    }
-                } catch (_: Exception) { /* skip */ }
-            }
-            // Pass 3: only for the legacy default zone — any non-dealer
-            // account for that isp regardless of its saved zone.
+
+            // Pass 2: Fallback for legacy (no zone field) — ONLY if requesting Okara
             if (zone.equals("Okara", ignoreCase = true)) {
                 for (i in 0 until arr.length()) {
                     try {
                         val obj = arr.getJSONObject(i)
-                        if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false)) {
+                        if (obj.getString("isp") == isp && 
+                            !obj.optBoolean("isDealer", false) && 
+                            !obj.has("zone")) {
                             return obj.getString("username")
                         }
-                    } catch (_: Exception) { /* skip */ }
+                    } catch (_: Exception) { }
                 }
             }
+
+            // Pass 3: Dealer account, exact isp+zone match (last resort)
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp && 
+                        obj.optBoolean("isDealer", false) && 
+                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { }
+            }
+            
             return null
         }
 
         fun getSavedPassword(context: Context, isp: String, zone: String = "Okara"): String? {
             val arr = safeAccountsArray(context) ?: return null
+
+            if (isp.equals("ZONG", ignoreCase = true) && zone.equals("Okara", ignoreCase = true)) {
+                preferredZongOkaraComplaintAccount(arr)?.let { return it.optString("password") }
+            }
+            
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false) && accountZone(obj) == zone) {
+                    if (obj.getString("isp") == isp && 
+                        !obj.optBoolean("isDealer", false) && 
+                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
                         return obj.getString("password")
                     }
                 } catch (_: Exception) { }
             }
-            for (i in 0 until arr.length()) {
-                try {
-                    val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && accountZone(obj) == zone) {
-                        return obj.getString("password")
-                    }
-                } catch (_: Exception) { }
-            }
+
             if (zone.equals("Okara", ignoreCase = true)) {
                 for (i in 0 until arr.length()) {
                     try {
                         val obj = arr.getJSONObject(i)
-                        if (obj.getString("isp") == isp && !obj.optBoolean("isDealer", false)) {
+                        if (obj.getString("isp") == isp && 
+                            !obj.optBoolean("isDealer", false) && 
+                            !obj.has("zone")) {
                             return obj.getString("password")
                         }
                     } catch (_: Exception) { }
                 }
             }
+
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.getString("isp") == isp && 
+                        obj.optBoolean("isDealer", false) && 
+                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
+            }
+            
             return null
         }
 
