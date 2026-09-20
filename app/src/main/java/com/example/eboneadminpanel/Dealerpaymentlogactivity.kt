@@ -234,26 +234,32 @@ class DealerPaymentLogActivity : AppCompatActivity() {
     private fun renderRowWithDealerName(doc: DocumentSnapshot) {
         val dealerId = doc.getString("dealerId") ?: ""
         if (dealerId.isEmpty()) {
-            listContainer.addView(logRow(doc, "Unknown dealer"))
+            listContainer.addView(logRow(doc, "Unknown dealer", "Okara"))
             return
         }
         val cached = dealerNameCache[dealerId]
         if (cached != null) {
-            listContainer.addView(logRow(doc, cached))
+            db.collection("dealers").document(dealerId).get().addOnSuccessListener { dDoc ->
+                val zone = dDoc.getString("zone")?.ifBlank { null } ?: "Okara"
+                listContainer.addView(logRow(doc, cached, zone))
+            }.addOnFailureListener {
+                listContainer.addView(logRow(doc, cached, "Okara"))
+            }
             return
         }
         db.collection("dealers").document(dealerId).get()
             .addOnSuccessListener { dealerDoc ->
                 val name = dealerDoc.getString("name") ?: dealerId
+                val zone = dealerDoc.getString("zone")?.ifBlank { null } ?: "Okara"
                 dealerNameCache[dealerId] = name
-                listContainer.addView(logRow(doc, name))
+                listContainer.addView(logRow(doc, name, zone))
             }
             .addOnFailureListener {
-                listContainer.addView(logRow(doc, dealerId))
+                listContainer.addView(logRow(doc, dealerId, "Okara"))
             }
     }
 
-    private fun logRow(doc: DocumentSnapshot, dealerName: String): LinearLayout {
+    private fun logRow(doc: DocumentSnapshot, dealerName: String, zone: String): LinearLayout {
         val panel = doc.getString("panel") ?: "?"
         val amount = doc.getDouble("amount") ?: 0.0
         val tid = doc.getString("bankTransactionId") ?: ""
@@ -262,6 +268,7 @@ class DealerPaymentLogActivity : AppCompatActivity() {
         val verifiedAt = doc.getLong("verifiedAt")
         val transferStatus = doc.getString("transferStatus") ?: ""
         val transferredAt = doc.getLong("transferredAt")
+        val matchedSmsBody = doc.getString("matchedSmsBody") ?: ""
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -279,13 +286,13 @@ class DealerPaymentLogActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             addView(TextView(this@DealerPaymentLogActivity).apply {
-                text = dealerName
+                text = "$dealerName ($zone)"
                 textSize = 14f
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 setTextColor(textDark)
             })
             addView(TextView(this@DealerPaymentLogActivity).apply {
-                text = "$panel  •  TID: $tid"
+                text = "$panel Panel  •  TID: $tid"
                 textSize = 11f
                 setTextColor(textMuted)
             })
@@ -298,9 +305,24 @@ class DealerPaymentLogActivity : AppCompatActivity() {
         })
         card.addView(topRow)
 
+        if (matchedSmsBody.isNotBlank()) {
+            card.addView(TextView(this).apply {
+                text = matchedSmsBody
+                textSize = 11f
+                setTextColor(Color.parseColor("#344054"))
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#F8F9FC"))
+                    cornerRadius = dp(8).toFloat()
+                    setStroke(dp(1), borderLight)
+                }
+                layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.topMargin = dp(6); it.bottomMargin = dp(6) }
+            })
+        }
+
         card.addView(View(this).apply {
             setBackgroundColor(borderLight)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(1)).also { it.topMargin = dp(10); it.bottomMargin = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(-1, dp(1)).also { it.topMargin = dp(4); it.bottomMargin = dp(8) }
         })
 
         card.addView(stageLine("Submitted", formatTime(submittedAt), textMuted))
@@ -312,11 +334,11 @@ class DealerPaymentLogActivity : AppCompatActivity() {
         )
         card.addView(
             if (transferStatus == "TRANSFERRED" && transferredAt != null)
-                stageLine("Sent on $panel panel", formatTime(transferredAt), green)
+                stageLine("Sent on $panel panel ($zone)", formatTime(transferredAt), green)
             else if (status == "VERIFIED")
-                stageLine("Sent on $panel panel", "Not sent yet", orange)
+                stageLine("Sent on $panel panel ($zone)", "Not sent yet", orange)
             else
-                stageLine("Sent on $panel panel", "—", textMuted)
+                stageLine("Sent on $panel panel ($zone)", "—", textMuted)
         )
 
         return card

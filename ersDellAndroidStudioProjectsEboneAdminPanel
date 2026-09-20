@@ -1,0 +1,452 @@
+[1mdiff --git a/app/src/main/java/com/example/eboneadminpanel/DealerPanelActivity.kt b/app/src/main/java/com/example/eboneadminpanel/DealerPanelActivity.kt[m
+[1mindex 69359e1..a42d07c 100644[m
+[1m--- a/app/src/main/java/com/example/eboneadminpanel/DealerPanelActivity.kt[m
+[1m+++ b/app/src/main/java/com/example/eboneadminpanel/DealerPanelActivity.kt[m
+[36m@@ -1,22 +1,45 @@[m
+package com.example.eboneadminpanel[m
+
+[32m{+import android.R+}[m
+[32m{+import android.app.Notification+}[m
+[32m{+import android.app.NotificationChannel+}[m
+[32m{+import android.app.NotificationManager+}[m
+[32m{+import android.content.Context+}[m
+import android.content.Intent[m
+import android.graphics.Color[m
+import android.graphics.Typeface[m
+import android.graphics.drawable.GradientDrawable[m
+[32m{+import android.media.AudioAttributes+}[m
+[32m{+import android.os.Build+}[m
+import android.os.Bundle[m
+import android.os.Handler[m
+import android.os.Looper[m
+[32m{+import android.provider.Settings+}[m
+[32m{+import android.text.Editable+}[m
+[32m{+import android.text.InputType+}[m
+[32m{+import android.text.TextUtils+}[m
+[32m{+import android.text.TextWatcher+}[m
+[32m{+import android.util.Log+}[m
+[32m{+import android.util.TypedValue+}[m
+import android.view.Gravity[m
+[32m{+import android.view.MotionEvent+}[m
+import android.view.View[m
+import android.widget.*[m
+import androidx.appcompat.app.AlertDialog[m
+import androidx.appcompat.app.AppCompatActivity[m
+[32m{+import androidx.appcompat.content.res.AppCompatResources+}[m
+[32m{+import androidx.core.app.NotificationCompat+}[m
+import androidx.lifecycle.lifecycleScope[m
+[32m{+import com.google.firebase.firestore.DocumentSnapshot+}[m
+import com.google.firebase.firestore.FirebaseFirestore[m
+import com.google.firebase.firestore.ListenerRegistration[m
+[32m{+import com.google.firebase.firestore.SetOptions+}[m
+import kotlinx.coroutines.Dispatchers[m
+import kotlinx.coroutines.launch[m
+[32m{+import java.text.SimpleDateFormat+}[m
+[32m{+import java.util.Date+}[m
+[32m{+import java.util.Locale+}[m
+[32m{+import kotlin.math.abs+}[m
+
+class DealerPanelActivity : AppCompatActivity() {[m
+
+[36m@@ -32,29 +55,21 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+
+    private var dealerCount = 0[m
+    private var totalBalance = 0.0[m
+    [32m{+private var activeStatFilter: String? = null // NEW: tracks which top card is selected+}[m
+
+[31m[-    // NEW: dealerId -> dealer name lookup, kept in sync from the same-][m
+[31m[-    // "dealers" snapshot listener that already builds the Dealers tab.-][m
+[31m[-    // observePending() uses this so every pending/verified payment row-][m
+[31m[-    // can show WHICH dealer it belongs to — previously the dealerId was-][m
+[31m[-    // read off each transaction but never actually looked up or shown.-][m
+    private val dealerNameCache = HashMap<String, String>()[m
+
+[31m[-    // NEW: remembers which EditText (inside whichever dialog is open) to-][m
+[31m[-    // fill once WebViewLoginActivity's FETCH_DEALER_ID flow returns a-][m
+[31m[-    // numeric Wateen dealer ID.-][m
+    private var pendingFetchIdInput: EditText? = null[m
+    private val REQUEST_FETCH_DEALER_ID = 7001[m
+
+[31m[-    // NEW: live franchise balances (franchiseSettings/balances doc) —-][m
+[31m[-    // separate from any individual dealer's balance. Updated whenever-][m
+[31m[-    // the 💰 Check Balance action successfully reads the Ebone panel.-][m
+    private var franchiseBalancesListener: ListenerRegistration? = null[m
+    private lateinit var franchiseBalancesRow: LinearLayout[m
+
+    private val REQUEST_CHECK_BALANCE = 7002[m
+    private val autoUpdateQueue = mutableListOf<Pair<String, String>>()[m
+    private var isAutoUpdating = false[m
+    [32m{+private var isBackgroundMode = false+}[m
+[32m{+    private var dealerSearchQuery = ""+}[m
+
+    private val paymentAccountNames = listOf([m
+        "EasyPaisa", "JazzCash", "SadaPay", "Raast ID",[m
+[36m@@ -77,6 +92,11 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+
+    override fun onCreate(savedInstanceState: Bundle?) {[m
+        super.onCreate(savedInstanceState)[m
+        
+        [32m{+// Initial load of background mode preference+}[m
+[32m{+        val prefs = getSharedPreferences("dealer_panel_prefs", MODE_PRIVATE)+}[m
+[32m{+        isBackgroundMode = prefs.getBoolean("is_background_mode", false)+}[m
+        
+        setContentView(buildScreen())[m
+        observeDealers()[m
+        observePending()[m
+[36m@@ -107,11 +127,6 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+    // ===================== SCREEN =====================[m
+
+    private fun buildScreen(): LinearLayout {[m
+[31m[-        // NEW: root is no longer wrapped in an outer ScrollView. The-][m
+[31m[-        // header, stats, franchise balances, and pending-payments-][m
+[31m[-        // section stay fixed on screen; only the Dealers list below-][m
+[31m[-        // scrolls (in its own ScrollView with weight=1, filling-][m
+[31m[-        // whatever vertical space is left).-][m
+        val root = LinearLayout(this).apply {[m
+            orientation = LinearLayout.VERTICAL[m
+            setBackgroundColor(bgLight)[m
+[36m@@ -120,11 +135,6 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+        root.addView(buildHeader())[m
+        root.addView(buildStatsRow())[m
+
+[31m[-        // NEW: wrapped in a horizontal scroll — with Zong now able to-][m
+[31m[-        // show both "Zong (Okara)" and "Zong (Renala)" chips alongside-][m
+[31m[-        // Ebone/Wateen, that's up to 4 chips, which can look cramped on-][m
+[31m[-        // narrow screens if forced into a fixed-width row. Scrolls-][m
+[31m[-        // instead of squeezing.-][m
+        val franchiseBalancesScroll = HorizontalScrollView(this).apply {[m
+            isHorizontalScrollBarEnabled = false[m
+        }[m
+[36m@@ -135,6 +145,30 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+        franchiseBalancesScroll.addView(franchiseBalancesRow)[m
+        root.addView(franchiseBalancesScroll)[m
+
+        [32m{+// NEW: Search Dealers bar+}[m
+[32m{+        val searchContainer = LinearLayout(this).apply {+}[m
+[32m{+            orientation = LinearLayout.HORIZONTAL+}[m
+[32m{+            setPadding(dp(16), dp(8), dp(16), dp(8))+}[m
+[32m{+            gravity = Gravity.CENTER_VERTICAL+}[m
+[32m{+        }+}[m
+[32m{+        val searchInput = EditText(this).apply {+}[m
+[32m{+            hint = "Search dealers by name..."+}[m
+[32m{+            textSize = 14f+}[m
+[32m{+            setPadding(dp(12), dp(10), dp(12), dp(10))+}[m
+[32m{+            background = outlinedPill(Color.WHITE, borderLight, 10)+}[m
+[32m{+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)+}[m
+[32m{+            addTextChangedListener(object : TextWatcher {+}[m
+[32m{+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}+}[m
+[32m{+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {+}[m
+[32m{+                    dealerSearchQuery = s?.toString()?.lowercase() ?: ""+}[m
+[32m{+                    observeDealers() // Trigger re-filter+}[m
+[32m{+                }+}[m
+[32m{+                override fun afterTextChanged(s: Editable?) {}+}[m
+[32m{+            })+}[m
+[32m{+        }+}[m
+[32m{+        searchContainer.addView(searchInput)+}[m
+[32m{+        root.addView(searchContainer)+}[m
+
+        root.addView(sectionTitle("Pending Payments"))[m
+        pendingList = LinearLayout(this).apply {[m
+            orientation = LinearLayout.VERTICAL[m
+[36m@@ -142,10 +176,6 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+        }[m
+        root.addView(pendingList)[m
+
+[31m[-        // NEW: Dealers section is its own independently-scrollable area-][m
+[31m[-        // — layout_height=0 + weight=1 makes it fill all remaining-][m
+[31m[-        // vertical space, and scrolling inside it never moves the-][m
+[31m[-        // header/stats/pending section above.-][m
+        val dealersScroll = ScrollView(this).apply {[m
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)[m
+        }[m
+[36m@@ -174,9 +204,6 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+            setPadding(dp(20), dp(48), dp(20), dp(20))[m
+        }[m
+
+[31m[-        // Title row — back arrow + title/subtitle ONLY. Icon buttons-][m
+[31m[-        // moved to their own scrollable row below, so this text never-][m
+[31m[-        // gets squeezed/wrapped no matter how many action icons exist.-][m
+        val titleRow = LinearLayout(this).apply {[m
+            gravity = Gravity.CENTER_VERTICAL[m
+        }[m
+[36m@@ -194,7 +221,7 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                text = "Dealer Panel"[m
+                textSize = 20f[m
+                setTextColor(Color.WHITE)[m
+                setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+                maxLines = 1[m
+            })[m
+            addView(TextView(this@DealerPanelActivity).apply {[m
+[36m@@ -202,23 +229,16 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                textSize = 12f[m
+                setTextColor(Color.parseColor("#B8C2E0"))[m
+                maxLines = 1[m
+                ellipsize = [31m[-android.text.TextUtils.TruncateAt.END-][m[32m{+TextUtils.TruncateAt.END+}[m
+            })[m
+        })[m
+        header.addView(titleRow)[m
+
+[31m[-        // NEW: icon action row — horizontally scrollable so it never-][m
+[31m[-        // forces the title to wrap and never overflows off-screen, no-][m
+[31m[-        // matter how many action icons this screen ends up with.-][m
+        val iconScroll = HorizontalScrollView(this).apply {[m
+            isHorizontalScrollBarEnabled = false[m
+            isFillViewport = true[m
+            setPadding(0, dp(14), 0, 0)[m
+        }[m
+[31m[-        // NEW: wrapper centers the icon row horizontally when it fits-][m
+[31m[-        // within the screen width (fillViewport stretches this wrapper-][m
+[31m[-        // to at least the visible width); if the icons ever overflow a-][m
+[31m[-        // narrow screen, the HorizontalScrollView still scrolls normally.-][m
+        val iconRowWrapper = LinearLayout(this).apply {[m
+            orientation = LinearLayout.HORIZONTAL[m
+            gravity = Gravity.CENTER_HORIZONTAL[m
+[36m@@ -232,32 +252,16 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+        }[m
+        iconRow.addView(iconButton("⟳") { scanNow() })[m
+        iconRow.addView(spacerH(8))[m
+[31m[-        // NEW: debug-only — opens the Ebone panel logged in, with the tap-][m
+[31m[-        // inspector active, and NO auto-activate customer ID (so it just-][m
+[31m[-        // sits on /clients for manual tapping/exploration). Temporary-][m
+[31m[-        // testing aid for confirming franchise-balance-transfer selectors-][m
+[31m[-        // before any real automation is wired up — safe to remove once-][m
+[31m[-        // selectors are confirmed.-][m
+        iconRow.addView(iconButton("🔍") { inspectEbonePanel() })[m
+        iconRow.addView(spacerH(8))[m
+[31m[-        // Send Dealer Payment — permanent screen (Dealer → Company →-][m
+[31m[-        // Amount → Send). Replaces the earlier temporary test dialog.-][m
+        iconRow.addView(iconButton("💸") { openSendPaymentScreen() })[m
+        iconRow.addView(spacerH(8))[m
+[31m[-        // NEW: reads the Ebone franchise balance dropdown and saves it +-][m
+[31m[-        // fires a low-balance notification if under the configured-][m
+[31m[-        // threshold.-][m
+        iconRow.addView(iconButton("💰") { checkEboneBalance() })[m
+        iconRow.addView(spacerH(8))[m
+[31m[-        // NEW: opens the Payment Log / transaction history screen.-][m
+        iconRow.addView(iconButton("📄") { startActivity(Intent(this, DealerPaymentLogActivity::class.java)) })[m
+        iconRow.addView(spacerH(8))[m
+[31m[-        // NEW: low-balance notification threshold settings, per panel.-][m
+        iconRow.addView(iconButton("⚙") { showThresholdSettingsDialog() })[m
+        iconRow.addView(spacerH(8))[m
+[31m[-        // NEW: per-zone service settings — which ISPs (Ebone/Wateen/-][m
+[31m[-        // Zong) are actually enabled for each franchise/zone (e.g.-][m
+[31m[-        // Renala only runs Zong right now while Okara runs all three).-][m
+        iconRow.addView(iconButton("🏷") { showZoneServiceSettingsDialog() })[m
+        iconRow.addView(spacerH(8))[m
+        iconRow.addView(iconButton("+") { showAddDealerDialog() })[m
+[36m@@ -285,30 +289,51 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+        setOnClickListener { onClick() }[m
+    }[m
+
+    [32m{+private var statsContainer: LinearLayout? = null+}[m
+    
+    private fun buildStatsRow(): LinearLayout {[m
+        [32m{+val container = LinearLayout(this).apply {+}[m
+[32m{+            id = View.generateViewId()+}[m
+[32m{+            statsContainer = this+}[m
+[32m{+            orientation = LinearLayout.VERTICAL+}[m
+[32m{+        }+}[m
+[32m{+        container.addView(buildStatsCards())+}[m
+[32m{+        return container+}[m
+[32m{+    }+}[m
+
+[32m{+    private fun buildStatsCards(): LinearLayout {+}[m
+        val row = LinearLayout(this).apply {[m
+            orientation = LinearLayout.HORIZONTAL[m
+            setPadding(dp(16), dp(16), dp(16), dp(4))[m
+        }[m
+
+        fun statCard(label: String, colorAccent: [31m[-Int):-][m[32m{+Int, type: String):+}[m Pair<LinearLayout, TextView> {
+            val valueText = TextView(this).apply {[m
+                textSize = 20f[m
+                setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+                setTextColor(textDark)[m
+            }[m
+            
+            [32m{+val isSelected = activeStatFilter == type+}[m
+            
+            val card = LinearLayout(this).apply {[m
+                orientation = LinearLayout.VERTICAL[m
+                setPadding(dp(14), dp(12), dp(14), dp(12))[m
+                background = [31m[-GradientDrawable().apply {-][m
+[31m[-                    setColor(cardWhite)-][m
+[31m[-                    cornerRadius = dp(14).toFloat()-][m
+[31m[-                    setStroke(dp(1), borderLight)-][m
+[31m[-                }-][m[32m{+outlinedPill(+}[m
+[32m{+                    if (isSelected) Color.parseColor("#EFF6FF") else cardWhite, +}[m
+[32m{+                    if (isSelected) Color.parseColor("#2563EB") else borderLight, +}[m
+[32m{+                    14+}[m
+[32m{+                )+}[m
+                elevation = [32m{+if(isSelected) dp(4).toFloat() else+}[m dp(1).toFloat()
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).also {[m
+                    it.marginEnd = dp(8)[m
+                }[m
+                
+                [32m{+val outValue = TypedValue()+}[m
+[32m{+                context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)+}[m
+[32m{+                foreground = AppCompatResources.getDrawable(context, outValue.resourceId)+}[m
+[32m{+                isClickable = true+}[m
+
+                addView(View(this@DealerPanelActivity).apply {[m
+                    layoutParams = LinearLayout.LayoutParams(dp(24), dp(4)).also { it.bottomMargin = dp(8) }[m
+                    background = pill(colorAccent, 4)[m
+[36m@@ -319,13 +344,18 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                    textSize = 11f[m
+                    setTextColor(textMuted)[m
+                })[m
+                
+                [32m{+setOnClickListener {+}[m
+[32m{+                    activeStatFilter = if (activeStatFilter == type) null else type+}[m
+[32m{+                    refreshStatsRow()+}[m
+[32m{+                }+}[m
+            }[m
+            return card to valueText[m
+        }[m
+
+        val (dealersCard, dealersVal) = statCard("Dealers", [31m[-navyMid)-][m[32m{+navyMid, "DEALERS")+}[m
+        val (pendingCard, pendingVal) = statCard("Pending", [31m[-orange)-][m[32m{+orange, "PENDING")+}[m
+        val (balanceCard, balanceVal) = statCard("Total Balance", [31m[-green)-][m[32m{+green, "TOTAL")+}[m
+
+        statDealersText = dealersVal[m
+        statPendingText = pendingVal[m
+[36m@@ -338,10 +368,20 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+        return row[m
+    }[m
+
+    [32m{+private fun refreshStatsRow() {+}[m
+[32m{+        statsContainer?.let {+}[m
+[32m{+            it.removeAllViews()+}[m
+[32m{+            it.addView(buildStatsCards())+}[m
+[32m{+            // Also refresh lists based on selection+}[m
+[32m{+            observeDealers()+}[m
+[32m{+            observePending()+}[m
+[32m{+        }+}[m
+[32m{+    }+}[m
+
+    private fun sectionTitle(text: String): TextView = TextView(this).apply {[m
+        this.text = text[m
+        textSize = 14f[m
+        setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+        setTextColor(textDark)[m
+        setPadding(dp(16), dp(20), dp(16), dp(8))[m
+    }[m
+[36m@@ -365,13 +405,19 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                    dealerList.addView(emptyState("No dealers yet — tap + to add one"))[m
+                }[m
+
+                [32m{+var index = 1+}[m
+                query.documents.forEach { document ->[m
+                    [32m{+val name = document.getString("name") ?: ""+}[m
+[32m{+                    if (dealerSearchQuery.isNotEmpty() && !name.lowercase().contains(dealerSearchQuery)) {+}[m
+[32m{+                        return@forEach+}[m
+[32m{+                    }+}[m
+
+                    val wateen = document.getDouble("wateenBalance") ?: 0.0[m
+                    val ebone = document.getDouble("eboneBalance") ?: 0.0[m
+                    val zong = document.getDouble("zongBalance") ?: 0.0[m
+                    totalBalance += wateen + ebone + zong[m
+                    dealerNameCache[document.id] = document.getString("name") ?: document.id[m
+                    dealerList.addView(dealerCard(document.id, [31m[-document))-][m[32m{+document, index++))+}[m
+                }[m
+
+                statDealersText.text = dealerCount.toString()[m
+[36m@@ -379,7 +425,7 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+            }[m
+    }[m
+
+    private fun dealerCard(dealerId: String, document: [31m[-com.google.firebase.firestore.DocumentSnapshot):-][m[32m{+DocumentSnapshot, index: Int):+}[m LinearLayout {
+        val wateen = document.getDouble("wateenBalance") ?: 0.0[m
+        val ebone = document.getDouble("eboneBalance") ?: 0.0[m
+        val zong = document.getDouble("zongBalance") ?: 0.0[m
+[36m@@ -410,7 +456,7 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+            addView(TextView(this@DealerPanelActivity).apply {[m
+                text = document.getString("name") ?: ""[m
+                textSize = 15f[m
+                setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+                setTextColor(textDark)[m
+            })[m
+            addView(TextView(this@DealerPanelActivity).apply {[m
+[36m@@ -419,16 +465,12 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                setTextColor(textMuted)[m
+            })[m
+        })[m
+[31m[-        // NEW: zone tag chip — small, muted, reuses the existing palette-][m
+[31m[-        // (Okara = navy, Renala = purple) so Renala dealers are visually-][m
+[31m[-        // distinguishable at a glance without looking like a mismatched-][m
+[31m[-        // color splash. Defaults missing zone to "Okara".-][m
+        val zone = document.getString("zone")?.ifBlank { null } ?: "Okara"[m
+        val zoneColor = if (zone == "Okara") navyMid else purple[m
+        topRow.addView(TextView(this).apply {[m
+            text = zone[m
+            textSize = 10f[m
+            setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+            setTextColor(zoneColor)[m
+            setPadding(dp(8), dp(4), dp(8), dp(4))[m
+            background = outlinedPill(Color.WHITE, zoneColor, 10)[m
+[36m@@ -458,23 +500,19 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                text = label[m
+                textSize = 10f[m
+                setTextColor(accent)[m
+                setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+            })[m
+            addView(TextView(this@DealerPanelActivity).apply {[m
+                text = "Rs. ${"%.0f".format(amount)}"[m
+                textSize = 13f[m
+                setTextColor(textDark)[m
+                setTypeface(null, [31m[-android.graphics.Typeface.BOLD)-][m[32m{+Typeface.BOLD)+}[m
+            })[m
+        }[m
+
+    // ===================== PENDING PAYMENTS (LIVE) =====================[m
+
+    private fun observePending() {[m
+[31m[-        // NEW: also fetch VERIFIED (SMS-matched today, waiting to be-][m
+[31m[-        // sent on the panel) and NEEDS_REVIEW (matched an OLDER SMS —-][m
+[31m[-        // held for manual confirmation, not auto-credited) alongside-][m
+[31m[-        // PENDING (waiting for SMS match) ones.-][m
+        pendingListener = db.collection("dealerTransactions")[m
+            .whereIn("status", listOf("PENDING", "VERIFIED", "NEEDS_REVIEW", "REJECTED_DUPLICATE"))[m
+            .addSnapshotListener { query, error ->[m
+[36m@@ -482,9 +520,6 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+
+                pendingList.removeAllViews()[m
+
+[31m[-                // NEW: a VERIFIED row that's already been sent-][m
+[31m[-                // (transferStatus == "TRANSFERRED") is done — don't-][m
+[31m[-                // count or show it here.-][m
+                val relevantDocs = query.documents.filter { doc ->[m
+                    val status = doc.getString("status")[m
+                    val transferStatus = doc.getString("transferStatus") ?: ""[m
+[36m@@ -547,20 +582,7 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+                        )[m
+
+                        "VERIFIED" -> {[m
+[31m[-                            /*-][m
+[31m[-                             * LIVE/TODAY verified payments must never expose-][m
+[31m[-                             * the old manual Send Now chain. The verifier is-][m
+[31m[-                             * already responsible for starting the existing-][m
+[31m[-                             * DEALER_TOPUP automation.-][m
+[31m[-                             */-][m
+                            when (transferStatus) {[m
+[31m[-                                // NEW: AUTO_CLAIMED is the brief (usually-][m
+[31m[-                                // sub-second) state between "verified" and-][m
+[31m[-                                // WebViewLoginActivity actually opening —-][m
+[31m[-                                // introduced by the fix that stops the same-][m
+[31m[-                                // payment from being sent to the panel twice.-][m
+[31m[-                                // Shown identically to AUTO_SENDING so the-][m
+[31m[-                                // row never silently disappears mid-flow.-][m
+                                "AUTO_SENDING", "AUTO_CLAIMED" -> pendingList.addView([m
+                                    swipeToDeleteWrapper([m
+                                        autoSendingRow([m
+[36m@@ -595,10 +617,6 @@[m [mclass DealerPanelActivity : AppCompatActivity() {[m
+            }[m
+    }[m
+
+[31m[-    /** NEW: permanently deletes a dealerTransactions record from-][m
+[31m[-     * Firestore — used by the swipe-to-delete action on the Pending-][m
+[31m[-     * Payments list. This is a real, permanent delete (not a status-][m
+[31m[-     * change) — there is no undo once confirmed. */-][m
+    private fun deletePendingPayment(transactionId: String) {[m
+        db.collection("dealerTransactions").document(transactionId).delete()[m
+            .addOnSuccessListener {[m
+[36m@@ -609,22 +627,8 @@[m [m

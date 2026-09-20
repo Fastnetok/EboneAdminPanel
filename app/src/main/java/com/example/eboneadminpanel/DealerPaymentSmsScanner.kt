@@ -4,8 +4,11 @@ import android.content.Context
 import android.provider.Telephony
 import android.util.Log
 import com.google.android.gms.tasks.Tasks
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import java.util.Calendar
+import java.util.Locale
+import kotlin.math.abs
 
 /**
  * Dealer SMS scanner.
@@ -156,21 +159,11 @@ object DealerPaymentSmsScanner {
                         .filter { it.length >= 6 }
                         .distinct()
 
-                if (candidateIdentifiers.isEmpty()) continue
-
-                /*
-                 * IMPORTANT:
-                 * For the dealer flow, the exact matched SMS is the proof.
-                 * Once it is inside the configured matching window, its age
-                 * (today / yesterday / older within the chosen window) does
-                 * NOT block automatic verification.
-                 *
-                 * The exact TID/reference match is still mandatory, so this
-                 * is not an amount-only auto-credit path.
-                 */
                 var matchedIdentifier: String? = null
-                val matchedEntry =
-                    smsEntries.firstOrNull { sms ->
+                var matchedEntry: SmsEntry? = null
+
+                if (candidateIdentifiers.isNotEmpty()) {
+                    matchedEntry = smsEntries.firstOrNull { sms ->
                         val hit = candidateIdentifiers.firstOrNull { identifier ->
                             sms.normalizedBody.contains(identifier)
                         }
@@ -181,6 +174,19 @@ object DealerPaymentSmsScanner {
                             false
                         }
                     }
+                }
+
+                val amount = (doc.get("amount") as? Number)?.toDouble() ?: 0.0
+                var isFallbackMatch = false
+
+                if (matchedEntry == null || matchedIdentifier == null) {
+                    val fallbackSms = smsEntries.firstOrNull { checkBankAlfalahFallback(doc, it, amount) }
+                    if (fallbackSms != null) {
+                        matchedEntry = fallbackSms
+                        matchedIdentifier = "FALLBACK_ALFALAH"
+                        isFallbackMatch = true
+                    }
+                }
 
                 if (matchedEntry == null || matchedIdentifier == null) {
                     continue
@@ -190,8 +196,17 @@ object DealerPaymentSmsScanner {
                     doc.data ?: continue
 
                 val dealerId = doc.getString("dealerId") ?: continue
-                val amount = (doc.get("amount") as? Number)?.toDouble() ?: 0.0
-                val identifierType = identifierTypeOf(matchedIdentifier!!, tid, ocrTid)
+                val identifierType = if (isFallbackMatch) "FALLBACK" else identifierTypeOf(matchedIdentifier!!, tid, ocrTid)
+
+                db.collection("dealerTransactions")
+                    .document(doc.id)
+                    .update(
+                        mapOf(
+                            "smsMatched" to true,
+                            "matchedSmsBody" to matchedEntry.body.take(500),
+                            "matchedSmsDate" to matchedEntry.dateMillis
+                        )
+                    )
 
                 claimThenVerify(
                     context = context,
@@ -322,16 +337,10 @@ object DealerPaymentSmsScanner {
                         .filter { it.isNotBlank() }
                         .distinct()
 
-                /*
-                 * Primary proof: exact TID/reference identity after
-                 * formatting normalization. This fixes SMS formats such as:
-                 *   1234-5678-9012
-                 *   1234 5678 9012
-                 *   TID:123456789012
-                 * all resolving to the same identifier.
-                 */
                 var matchedIdentifier: String? = null
-                val matchedEntry = smsEntries.firstOrNull { sms ->
+                var matchedEntry: SmsEntry? = null
+
+                matchedEntry = smsEntries.firstOrNull { sms ->
                     val hit = candidateIdentifiers.firstOrNull { identifier ->
                         identifier.length >= 6 &&
                                 sms.normalizedBody.contains(identifier)
@@ -343,10 +352,21 @@ object DealerPaymentSmsScanner {
                         false
                     }
                 }
+
+                var isFallbackMatch = false
+                if (matchedEntry == null || matchedIdentifier == null) {
+                    val fallbackSms = smsEntries.firstOrNull { checkBankAlfalahFallback(doc, it, amount) }
+                    if (fallbackSms != null) {
+                        matchedEntry = fallbackSms
+                        matchedIdentifier = "FALLBACK_ALFALAH"
+                        isFallbackMatch = true
+                    }
+                }
+
                 if (matchedEntry == null || matchedIdentifier == null) continue
 
                 val txnData = doc.data ?: continue
-                val identifierType = identifierTypeOf(matchedIdentifier!!, tid, ocrTid)
+                val identifierType = if (isFallbackMatch) "FALLBACK" else identifierTypeOf(matchedIdentifier!!, tid, ocrTid)
 
                 /*
                  * DEALER RULE:
@@ -492,5 +512,80 @@ object DealerPaymentSmsScanner {
                 }
             }
         }
+    }
+
+    private fun checkBankAlfalahFallback(doc: DocumentSnapshot, sms: SmsEntry, expectedAmount: Double): Boolean {
+        val isAlfalah = sms.body.contains("Alfalah", ignoreCase = true) || 
+                        sms.body.contains("BAHL", ignoreCase = true) || 
+                        sms.body.contains("BAF", ignoreCase = true) || 
+                        sms.body.contains("BankAlfalah", ignoreCase = true)
+        if (!isAlfalah) return false
+
+        val calSms = Calendar.getInstance().apply { timeInMillis = sms.dateMillis }
+        val calNow = Calendar.getInstance()
+        val isToday = calSms.get(Calendar.YEAR) == calNow.get(Calendar.YEAR) &&
+                      calSms.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR)
+        if (!isToday) return false
+
+        val smsAmount = extractAmountFromText(sms.body) ?: return false
+        if (abs(smsAmount - expectedAmount) >= 1.0) return false
+
+        val timeRegex = Regex("""\b(\d{1,2}):(\d{2})\b""")
+        val timeMatch = timeRegex.find(sms.body)
+        var timeMatched = false
+        if (timeMatch != null) {
+            val smsTimeStr = timeMatch.value
+            val smsHour = timeMatch.groupValues[1].toIntOrNull()
+            val smsMinute = timeMatch.groupValues[2].toIntOrNull()
+            
+            val hour12 = if (smsHour != null) {
+                val h = smsHour % 12
+                if (h == 0) 12 else h
+            } else null
+            val smsTimeStr12 = if (hour12 != null && smsMinute != null) String.format(Locale.US, "%d:%02d", hour12, smsMinute) else ""
+            val smsTimeStr12Zero = if (hour12 != null && smsMinute != null) String.format(Locale.US, "%02d:%02d", hour12, smsMinute) else ""
+
+            for (key in doc.data?.keys ?: emptySet()) {
+                val valueStr = doc.get(key)?.toString()?.trim() ?: continue
+                if (valueStr.contains(smsTimeStr) || 
+                    (smsTimeStr12.isNotBlank() && valueStr.contains(smsTimeStr12)) ||
+                    (smsTimeStr12Zero.isNotBlank() && valueStr.contains(smsTimeStr12Zero))) {
+                    timeMatched = true
+                    break
+                }
+            }
+        } else {
+            val submittedAt = doc.getLong("submittedAt") ?: 0L
+            if (submittedAt > 0L && abs(sms.dateMillis - submittedAt) <= 10 * 60 * 1000L) {
+                timeMatched = true
+            }
+        }
+        if (!timeMatched) return false
+
+        val possibleNameFields = listOf("senderName", "ocrSenderName", "ocrName", "accountHolder", "sender", "dealerName")
+        var nameMatched = false
+        var hasNameField = false
+        for (field in possibleNameFields) {
+            val nameVal = doc.getString(field)?.trim()
+            if (!nameVal.isNullOrBlank() && nameVal.length >= 3) {
+                hasNameField = true
+                if (sms.body.contains(nameVal, ignoreCase = true)) {
+                    nameMatched = true
+                    break
+                }
+                val words = nameVal.split(" ").filter { it.length >= 4 }
+                if (words.isNotEmpty() && words.all { sms.body.contains(it, ignoreCase = true) }) {
+                    nameMatched = true
+                    break
+                }
+            }
+        }
+        
+        return !hasNameField || nameMatched
+    }
+
+    private fun extractAmountFromText(smsBody: String): Double? {
+        val regex = Regex("""(?:Rs\.?|PKR)\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)""", RegexOption.IGNORE_CASE)
+        return regex.find(smsBody)?.groupValues?.getOrNull(1)?.replace(",", "")?.toDoubleOrNull()
     }
 }

@@ -151,21 +151,24 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             }
 
             url.contains("sub_dealers.php") && manualAction == "DEALER_TOPUP" -> {
-                if (!dealerTopupAttempted) {
-                    dealerTopupAttempted = true
+                if (!dealerListLoadAttempted) {
+                    dealerListLoadAttempted = true
                     webView.postDelayed({ searchAndClickZongDealer(dealerSearchName ?: dealerDisplayName ?: "") }, 800)
                 }
             }
 
             url.contains("subdealer_portal.php") && manualAction == "DEALER_TOPUP" -> {
-                webView.postDelayed({ openZongAddCreditAndSubmit(topupAmount ?: "") }, 800)
+                if (!dealerTopupAttempted) {
+                    dealerTopupAttempted = true
+                    webView.postDelayed({ openZongAddCreditAndSubmit(topupAmount ?: "") }, 800)
+                }
             }
 
             url.contains("turbonet.zong.com.pk") && !url.contains("login.php") -> {
                 loginDone = true
                 if (manualAction == "DEALER_TOPUP") {
-                    if (!dealerListLoadAttempted) {
-                        dealerListLoadAttempted = true
+                    if (!customerListPrepared) {
+                        customerListPrepared = true
                         webView.loadUrl(dealerListUrl)
                     }
                 } else if (manualAction == "CHECK_BALANCE") {
@@ -385,8 +388,8 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private fun openZongAddCreditAndSubmit(amount: String) {
         webView.evaluateJavascript("(function(){ var btns=document.querySelectorAll('button[data-target=\"#credit\"]'); if(btns.length>0){ btns[0].click(); return 'clicked'; } return 'not_found'; })()") {
             webView.postDelayed({
-                webView.evaluateJavascript("(function(){ var inp=document.querySelector('input[name=\"credit_amount\"]'); if(inp){ inp.value='$amount'; document.querySelector('button[name=\"doNewCredit\"]').click(); return 'submitted'; } return 'not_found'; })()") {
-                    webView.postDelayed({ captureDealerTopupResult() }, 3000)
+                webView.evaluateJavascript("(function(){ var inp=document.querySelector('input[name=\"credit_amount\"]'); if(inp && !window.__zongSubmitted){ window.__zongSubmitted=true; inp.value='$amount'; document.querySelector('button[name=\"doNewCredit\"]').click(); return 'submitted'; } return 'already_submitted'; })()") { _ ->
+                    webView.postDelayed({ captureDealerTopupResult() }, 2000)
                 }
             }, 1000)
         }
@@ -407,7 +410,19 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private fun captureDealerTopupResult() {
         webView.evaluateJavascript("(function(){ return document.body.innerText.substring(0,500); })()") { clean ->
             val logEntry = mapOf("dealerName" to (dealerDisplayName ?: ""), "panel" to "ZONG", "amount" to (topupAmount?.toDoubleOrNull() ?: 0.0), "submittedAt" to System.currentTimeMillis(), "zone" to "Okara")
-            db.collection("dealerPayments").add(logEntry).addOnCompleteListener { finish() }
+            db.collection("dealerPayments").add(logEntry)
+            
+            val transactionId = sourceTransactionId?.trim()?.takeIf { it.isNotBlank() }
+            if (transactionId != null) {
+                db.collection("dealerTransactions").document(transactionId).update(mapOf("status" to "COMPLETED", "transferStatus" to "TRANSFERRED", "transferredAt" to System.currentTimeMillis()))
+                    .addOnCompleteListener { 
+                        setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("selected_isp", "ZONG"); putExtra("target_zone", "Okara") })
+                        finish()
+                    }
+            } else {
+                setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("selected_isp", "ZONG"); putExtra("target_zone", "Okara") })
+                finish()
+            }
         }
     }
 

@@ -404,14 +404,15 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                                 "var modal=document.querySelector('${selectorJs}');" +
                                 "if(!modal)return'modal_not_found';" +
                                 "var btn=modal.querySelector('button[name=\\\"doNewCredit\\\"]');" +
-                                "if(!btn)return'not_found';" +
-                                "btn.click();return'submitted';" +
+                                "if(btn && !window.__zongRenalaModalSubmitted){" +
+                                "  window.__zongRenalaModalSubmitted=true;" +
+                                "  btn.click(); return 'submitted';" +
+                                "}" +
+                                "return 'already_submitted';" +
                                 "})()"
                     ) { submitRaw ->
                         if (cleanJsResult(submitRaw) == "submitted") {
                             webView.postDelayed({ captureDealerTopupResult() }, 2500)
-                        } else {
-                            fail("Zong Renala Credit Account button not found.")
                         }
                     }
                 }, 600)
@@ -455,14 +456,15 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                                 "(function(){" +
                                         "var modal=document.querySelector('#credit');" +
                                         "var btn=modal?modal.querySelector('button[name=\\\"doNewCredit\\\"]'):document.querySelector('button[name=\\\"doNewCredit\\\"]');" +
-                                        "if(!btn)return'not_found';" +
-                                        "btn.click();return'submitted';" +
+                                        "if(btn && !window.__zongRenalaSubmitted){" +
+                                        "  window.__zongRenalaSubmitted=true;" +
+                                        "  btn.click(); return 'submitted';" +
+                                        "}" +
+                                        "return 'already_submitted';" +
                                         "})()"
                             ) { submitRaw ->
                                 if (cleanJsResult(submitRaw) == "submitted") {
                                     webView.postDelayed({ captureDealerTopupResult() }, 2500)
-                                } else {
-                                    fail("Zong Renala Credit Account button not found.")
                                 }
                             }
                         }, 300)
@@ -528,18 +530,15 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
             val transactionId = sourceTransactionId?.trim()?.takeIf { it.isNotBlank() }
             if (transactionId != null) {
                 db.collection("dealerTransactions").document(transactionId).update(mapOf("status" to "COMPLETED", "transferStatus" to "TRANSFERRED", "transferredAt" to System.currentTimeMillis(), "transferResultText" to clean.take(500)))
-                    .addOnCompleteListener { continueAfterDealerTopupSuccess() }
+                    .addOnCompleteListener { 
+                        setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("selected_isp", "ZONG"); putExtra("target_zone", ZONE) })
+                        finish()
+                    }
             } else {
                 setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("selected_isp", "ZONG"); putExtra("target_zone", ZONE) })
-                continueAfterDealerTopupSuccess()
+                finish()
             }
         }
-    }
-
-    private fun continueAfterDealerTopupSuccess() {
-        manualAction = "CHECK_BALANCE"
-        balanceReadStarted = false
-        webView.loadUrl(HOME_URL)
     }
 
     private fun fail(message: String) {
