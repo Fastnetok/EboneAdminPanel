@@ -196,7 +196,9 @@ class EboneWebViewActivity : AppCompatActivity() {
                 prepareEbonePasswordAction()
             }
             url.contains("/payments/addbalance/") && manualAction == "DEALER_TOPUP" -> {
-                if (!eboneTopupSubmitAttempted && !eboneTopupSuccessConfirmed) {
+                if (eboneTopupSubmitAttempted && !eboneTopupSuccessConfirmed) {
+                    verifyEboneDealerTopupResult(topupAmount ?: "", eboneTopupVerificationAttempt)
+                } else if (!eboneTopupSubmitAttempted && !eboneTopupSuccessConfirmed) {
                     fillDealerTopupAmountAndSubmit()
                 }
             }
@@ -584,26 +586,48 @@ class EboneWebViewActivity : AppCompatActivity() {
         val amount = topupAmount
         if (amount.isNullOrBlank()) { finishManualActionFailure("No amount provided"); return }
         if (eboneTopupSuccessConfirmed) return
-        if (eboneTopupSubmitAttempted) return
+        if (eboneTopupSubmitAttempted) { verifyEboneDealerTopupResult(amount, eboneTopupVerificationAttempt); return }
         if (eboneTopupSubmitAttempt >= 3) { finishManualActionFailure("Form not ready after 3 checks"); return }
 
         eboneTopupSubmitAttempt++
         webView.postDelayed({
             webView.evaluateJavascript("(function(){ var inp = document.querySelector('input[name=\\\"PaidAmt\\\"]'); if(!inp) return 'no_amount_field'; if(inp.disabled || inp.readOnly) return 'disabled'; inp.value = '$amount'; inp.dispatchEvent(new Event('input',{bubbles:true})); var form = inp.form || document.querySelector('form[action*=\\\"addbalance\\\"]'); if(!form) return 'no_form'; var btn = form.querySelector('button[type=submit],input[type=submit],#send'); if(btn && (btn.disabled || btn.offsetParent === null)) return 'submit_not_ready'; return 'ready'; })()") { raw ->
                 if (raw.trim().removeSurrounding("\"") != "ready") { webView.postDelayed({ fillDealerTopupAmountAndSubmit() }, 1200); return@evaluateJavascript }
-                webView.evaluateJavascript("(function(){ var inp = document.querySelector('input[name=\\\"PaidAmt\\\"]'); var form = inp ? (inp.form || document.querySelector('form[action*=\\\"addbalance\\\"]')) : null; var btn = form ? (form.querySelector('button[type=submit],input[type=submit],#send') || document.querySelector('#send')) : null; if(btn && !btn.disabled && btn.offsetParent !== null && !window.__eboneSubmitted){ window.__eboneSubmitted=true; btn.click(); return 'clicked'; } return 'already_clicked'; })()") { res ->
+                webView.evaluateJavascript("(function(){ var inp = document.querySelector('input[name=\\\"PaidAmt\\\"]'); var form = inp ? (inp.form || document.querySelector('form[action*=\\\"addbalance\\\"]')) : null; var btn = form ? (form.querySelector('button[type=submit],input[type=submit],#send') || document.querySelector('#send')) : null; if(btn && !btn.disabled && btn.offsetParent !== null){ btn.click(); return 'clicked'; } return 'submit_not_ready'; })()") { res ->
                     if (res.trim().removeSurrounding("\"") == "clicked") {
-                        eboneTopupSubmitAttempted = true
-                        webView.postDelayed({ captureDealerTopupResult() }, 2000)
+                        eboneTopupSubmitAttempted = true; eboneTopupVerificationAttempt = 0
+                        verifyEboneDealerTopupResult(amount, 0)
                     } else { webView.postDelayed({ fillDealerTopupAmountAndSubmit() }, 1200) }
                 }
             }
         }, 900)
     }
 
+    private fun verifyEboneDealerTopupResult(amount: String, attempt: Int) {
+        if (eboneTopupSuccessConfirmed) return
+        if (attempt >= 3) { finishManualActionFailure("Submit clicked but success not confirmed"); return }
+
+        eboneTopupVerificationAttempt = attempt
+        webView.postDelayed({
+            webView.evaluateJavascript("(function(){ var body=((document.body&&document.body.innerText)||'').replace(/\\\\s+/g,' ').trim(); var url=window.location.href||''; var success=/(payment|balance|credit|transaction)[^\\\\n]{0,80}(success|successful|completed|added|updated)|successfully[^\\\\n]{0,80}(payment|added|updated|credited)|payment[^\\\\n]{0,80}successful/i.test(body); var error=/(error|failed|failure|invalid|insufficient|unable|cannot|not found)/i.test(body); return JSON.stringify({url:url,success:success,error:error,body:body.substring(0,800)}); })()") { raw ->
+                val clean = raw.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\")
+                val success = clean.contains("\"success\":true")
+                if (success) { eboneTopupSuccessConfirmed = true; captureDealerTopupResult(); return@evaluateJavascript }
+                if (attempt + 1 < 3 && !clean.contains("\"error\":true")) { webView.postDelayed({ verifyEboneDealerTopupResult(amount, attempt + 1) }, 850) }
+                else { markSubmittedButUnconfirmed() }
+            }
+        }, 1800)
+    }
+
+    private fun markSubmittedButUnconfirmed() {
+        eboneTopupSuccessConfirmed = true
+        sourceTransactionId?.let { if (it.isNotBlank()) db.collection("dealerTransactions").document(it).update(mapOf("transferStatus" to "AUTO_FAILED", "transferError" to "Submit clicked once but success not confirmed")) }
+        finishManualActionFailure("Submit clicked once but success not confirmed. Check panel manually.")
+    }
+
     private fun captureDealerTopupResult() {
         webView.evaluateJavascript("(function(){ var b = document.querySelector('.box-body'); var text = (b ? b.innerText : document.body.innerText) || ''; var dealerBalance = ''; var labels = document.querySelectorAll('h5.card-title'); for (var i=0;i<labels.length;i++){ if (labels[i].innerText.trim() === 'Dealer Balance'){ var valEl = labels[i].parentElement ? labels[i].parentElement.querySelector('span.h2') : null; if (valEl) dealerBalance = valEl.innerText.trim(); break; } } return JSON.stringify({text: text.substring(0, 800), url: window.location.href, dealerBalance: dealerBalance}); })()") { raw ->
-            val clean = if (raw != null && raw != "null") raw.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\") else ""
+            val clean = raw.removeSurrounding("\"").replace("\\\"", "\"").replace("\\\\", "\\")
             val balance = Regex("\"dealerBalance\":\"(.*?)\"").find(clean)?.groupValues?.get(1) ?: ""
             val amount = topupAmount?.toDoubleOrNull() ?: 0.0
             val logEntry = mapOf("dealerId" to (dealerInternalId ?: ""), "dealerName" to (dealerDisplayName ?: ""), "panel" to "EBONE", "ispDealerId" to (dealerEboneId ?: ""), "amount" to amount, "submittedAt" to System.currentTimeMillis(), "resultText" to clean.take(500), "dealerBalanceAfter" to balance, "sourceTransactionId" to (sourceTransactionId ?: ""))
@@ -612,15 +636,19 @@ class EboneWebViewActivity : AppCompatActivity() {
             val smsId = sourceTransactionId?.takeIf { it.isNotBlank() }
             if (smsId != null) {
                 db.collection("dealerTransactions").document(smsId).update(mapOf("status" to "COMPLETED", "transferStatus" to "TRANSFERRED", "transferredAt" to System.currentTimeMillis(), "transferResultText" to clean.take(500)))
-                    .addOnCompleteListener { 
-                        setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("sms_payment_completed", true); putExtra("source_transaction_id", smsId) })
-                        finish() 
-                    }
+                    .addOnSuccessListener { manualAction = null; setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true); putExtra("sms_payment_completed", true); putExtra("source_transaction_id", smsId) }); finish() }
+                    .addOnFailureListener { continueAfterDealerTopupSuccess() }
             } else {
                 setResult(RESULT_OK, Intent().apply { putExtra("dealer_topup_submitted", true) })
-                finish()
+                continueAfterDealerTopupSuccess()
             }
         }
+    }
+
+    private fun continueAfterDealerTopupSuccess() {
+        manualAction = "CHECK_BALANCE"
+        eboneBalanceCheckAttempted = false
+        webView.postDelayed({ readEboneFranchiseBalance() }, 1000)
     }
 
     private fun readEboneFranchiseBalance(attempt: Int = 1) {
