@@ -138,7 +138,7 @@ class EboneWebViewActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (url == null) return
                 CookieManager.getInstance().flush()
-                
+
                 if (debugTapInspectorEnabled) {
                     webView.evaluateJavascript(
                         "(function(){" +
@@ -282,7 +282,7 @@ class EboneWebViewActivity : AppCompatActivity() {
         val rawAccounts = securePrefs(PREFS_NAME).getString(KEY_ACCOUNTS, "") ?: ""
         val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
         val active = securePrefs(PREFS_NAME).getString(KEY_ACTIVE, "") ?: ""
-        
+
         if (active.isNotEmpty() && accounts.has(active)) {
             val acc = accounts.getJSONObject(active)
             val cookie = acc.optString("cookie", "")
@@ -317,7 +317,7 @@ class EboneWebViewActivity : AppCompatActivity() {
             doLoginWith(ispUsername, ispPassword)
             return
         }
-        
+
         val rawAccounts = securePrefs(PREFS_NAME).getString(KEY_ACCOUNTS, "") ?: ""
         val accounts = if (rawAccounts.isEmpty()) JSONObject() else JSONObject(rawAccounts)
         val active = securePrefs(PREFS_NAME).getString(KEY_ACTIVE, "") ?: ""
@@ -443,7 +443,7 @@ class EboneWebViewActivity : AppCompatActivity() {
     private fun fillEbonePasswordAndSubmit() {
         val newPassword = if (manualAction == "SUSPEND") EBONE_SUSPEND_PASSWORD else eboneOriginalPassword?.trim().orEmpty()
         if (newPassword.isEmpty()) { finishManualActionFailure("No original EBONE password available"); return }
-        
+
         webView.settings.saveFormData = false
         webView.postDelayed({
             webView.evaluateJavascript(
@@ -660,9 +660,9 @@ class EboneWebViewActivity : AppCompatActivity() {
                 if (text.isNotBlank()) {
                     val balance = Regex("Balance:\\s*(-?[0-9.,]+)").find(text)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
                     if (balance != null) {
-                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) { 
+                        FranchiseBalanceManager.updateBalance("EBONE", balance, targetZone) {
                             FranchiseBalanceManager.showUpdateNotification(this, "EBONE", balance, targetZone)
-                            FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone) 
+                            FranchiseBalanceManager.checkAndNotifyLowBalance(this, "EBONE", balance, targetZone)
                         }
                         setResult(RESULT_OK, Intent().apply { putExtra("checked_balance", balance) })
                         webView.postDelayed({ finish() }, 500)
