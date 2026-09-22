@@ -265,6 +265,9 @@ class ReportsActivity : AppCompatActivity() {
                                 }
 
                                 fun addComplaint(cs: DataSnapshot) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) return
+
                                     val assignedRaw = cs.child("assignedTo")
                                         .getValue(String::class.java)
                                         ?: ""
@@ -327,6 +330,9 @@ class ReportsActivity : AppCompatActivity() {
 
                                 // resolvedComplaints node — skip complaints already present above.
                                 for (cs in resolvedSnapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val complaintId = cs.child("complaintId")
                                         .getValue(String::class.java)
                                         ?: cs.key
@@ -591,6 +597,9 @@ class ReportsActivity : AppCompatActivity() {
 
                                 // complaints node
                                 for (cs in snapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val cId = cs.child("complaintId")
                                         .getValue(String::class.java) ?: cs.key ?: ""
                                     if (cId.isNotEmpty()) complaintsIds.add(cId)
@@ -613,6 +622,9 @@ class ReportsActivity : AppCompatActivity() {
 
                                 // resolvedComplaints node (skip duplicates already counted above)
                                 for (cs in resolvedSnapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val complaintId = cs.child("complaintId")
                                         .getValue(String::class.java) ?: cs.key ?: ""
                                     if (complaintsIds.contains(complaintId)) continue
@@ -741,6 +753,9 @@ class ReportsActivity : AppCompatActivity() {
                     val todayStart = getTodayStart()
 
                     for (item in snapshot.children) {
+                        val isNewConnection = item.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                        if (isNewConnection) continue
+
                         val status = item.child("status")
                             .getValue(String::class.java) ?: ""
                         if (status.equals("Resolved", true)) {
@@ -821,6 +836,9 @@ class ReportsActivity : AppCompatActivity() {
 
                                 // complaints node
                                 for (cs in snapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val assignedTo = cs.child("assignedTo")
                                         .getValue(String::class.java) ?: ""
                                     val userId = cs.child("userId")
@@ -874,6 +892,9 @@ class ReportsActivity : AppCompatActivity() {
 
                                 // resolvedComplaints node
                                 for (cs in resolvedSnapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val complaintId = cs.child("complaintId")
                                         .getValue(String::class.java) ?: cs.key ?: ""
                                     val assignedTo = cs.child("assignedTo")
@@ -1061,6 +1082,9 @@ class ReportsActivity : AppCompatActivity() {
                                 }
 
                                 for (cs in snapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val assignedTo = cs.child("assignedTo")
                                         .getValue(String::class.java) ?: ""
                                     val status = cs.child("status")
@@ -1098,6 +1122,9 @@ class ReportsActivity : AppCompatActivity() {
                                 }
 
                                 for (cs in resolvedSnapshot.children) {
+                                    val isNewConnection = cs.child("isNewConnection").getValue(Boolean::class.java) ?: false
+                                    if (isNewConnection) continue
+
                                     val complaintId = cs.child("complaintId")
                                         .getValue(String::class.java) ?: cs.key ?: ""
                                     val assignedTo = cs.child("assignedTo")

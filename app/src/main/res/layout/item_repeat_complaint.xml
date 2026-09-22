@@ -17,17 +17,44 @@
         android:visibility="gone" />
 
     <TextView
+        android:id="@+id/itemUserIdText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textColor="#E65100" />
+
+    <TextView
+        android:id="@+id/itemDateText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#212121"
+        android:textStyle="bold"
+        android:layout_marginTop="2dp" />
+
+    <TextView
         android:id="@+id/itemAddressText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="14sp"
-        android:textColor="#212121" />
+        android:textColor="#212121"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/itemPhoneText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="13sp"
+        android:textColor="#1B5E20"
+        android:layout_marginTop="2dp" />
 
     <TextView
         android:id="@+id/itemStatusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="13sp"
+        android:textStyle="bold"
         android:layout_marginTop="2dp" />
 
 </LinearLayout>
