@@ -163,11 +163,10 @@ class PaymentActivationService : Service() {
 
                 if (!hasNewPending) return@addSnapshotListener
 
-                snapshot?.documents?.forEach { doc ->
-                    processedDealerTransactionIds.add(doc.id)
-                }
-
                 Log.d(TAG, "New dealer PENDING payment(s) detected — running scanner immediately.")
+                
+                // Clear ID cache to ensure re-added docs are scanned
+                processedDealerTransactionIds.clear()
 
                 // Same matching engine the manual 🔄 retry button uses —
                 // exact TID/reference match against the configured SMS

@@ -46,6 +46,7 @@
         <activity android:name=".GeoFenceActivity" android:exported="false" />
         <activity android:name=".AssignedComplaintsActivity" android:exported="false" />
         <activity android:name=".ReportsActivity" android:exported="false" />
+        <activity android:name=".AllComplaintsActivity" android:exported="false" />
         <activity android:name=".EmployeeReportDetailsActivity" android:exported="false" />
         <activity android:name=".MovementTrackingActivity" android:exported="false" />
         <activity android:name=".FuelSettingsActivity" android:exported="false" />

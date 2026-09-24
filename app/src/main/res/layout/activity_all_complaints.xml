@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/allComplaintsRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#ECEFF1">
+
+    <!-- Top App Bar with Dynamic Status Bar Inset Padding -->
+    <LinearLayout
+        android:id="@+id/topHeaderBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="56dp"
+        android:background="#455A64"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp">
+
+        <ImageButton
+            android:id="@+id/btnBack"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_arrow_back"
+            android:contentDescription="Back"
+            app:tint="#FFFFFF" />
+
+        <TextView
+            android:id="@+id/tvHeaderTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="ALL COMPLAINTS"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <Button
+            android:id="@+id/btnDateRangePicker"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:backgroundTint="#37474F"
+            android:text="📅 Date Range"
+            android:textColor="#FFFFFF"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:stateListAnimator="@null"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp" />
+
+    </LinearLayout>
+
+    <!-- View Mode Switcher Bar (CUSTOMER | DATE | AREA) with Neutral/Transparent Background -->
+    <LinearLayout
+        android:id="@+id/llTabSegmentContainer"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@android:color/transparent"
+        android:padding="2dp">
+
+        <Button
+            android:id="@+id/btnViewCustomer"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="👤 CUSTOMER"
+            android:textColor="#212121"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:stateListAnimator="@null" />
+
+        <Button
+            android:id="@+id/btnViewDate"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="📅 DATE"
+            android:textColor="#212121"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:stateListAnimator="@null" />
+
+        <Button
+            android:id="@+id/btnViewArea"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:text="📍 AREA"
+            android:textColor="#212121"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:stateListAnimator="@null" />
+
+    </LinearLayout>
+
+    <!-- Stats & Search Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_margin="8dp"
+        android:background="@drawable/bg_decent_card"
+        android:padding="10dp"
+        android:elevation="1dp">
+
+        <AutoCompleteTextView
+            android:id="@+id/searchAreaEditText"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:hint="🔍 Search by Customer, Area, Address or Phone..."
+            android:padding="10dp"
+            android:textSize="14sp"
+            android:background="@drawable/bg_spinner"
+            android:inputType="text"
+            android:completionThreshold="1" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
+
+            <TextView
+                android:id="@+id/tvStatTotal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Total: 0"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#37474F" />
+
+            <TextView
+                android:id="@+id/tvStatResolved"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Resolved: 0"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#2E7D32" />
+
+            <TextView
+                android:id="@+id/tvStatPending"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Pending: 0"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#E65100" />
+
+            <TextView
+                android:id="@+id/tvStatAreas"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Groups: 0"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#1565C0" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Selected Date Range Text -->
+    <TextView
+        android:id="@+id/tvSelectedRangeLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="4dp"
+        android:text="📅 Showing complaints for selected period"
+        android:textColor="#546E7A"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <!-- RecyclerView for Complaints / Groups -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvAreaComplaints"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="16dp" />
+
+</LinearLayout>

@@ -21,46 +21,24 @@ class EboneAdminApp : Application() {
     private var db: FirebaseDatabase? = null
     private var leaveListener: ChildEventListener? = null
     private var foregroundActivity: Activity? = null
+        set(value) {
+            field = value
+            currentForegroundActivity = value
+        }
     private val pendingPopups = mutableListOf<Triple<String, String, String>>()
-    // name, reason, key
-
-    // ============================================================
-    // NEW: foreground-only automatic relief-expiry disable checker.
-    //
-    // WHY THIS EXISTS:
-    // GraceDeadlineWorker (WorkManager) already checks for expired
-    // relief customers in the background, but Android enforces a hard
-    // minimum of ~15 minutes between periodic background runs, AND a
-    // background process is not allowed to silently start a new
-    // Activity (the real ISP panel login only works inside a visible
-    // WebView) — so that path can only ever raise a notification and
-    // wait for a manual tap.
-    //
-    // The admin explicitly asked: whenever the app itself is open and
-    // visible (any screen — not a specific one), expired relief
-    // customers should be disabled completely automatically, with no
-    // tap required. Starting a new Activity from the foreground IS
-    // allowed by Android, so this is done here with a lightweight
-    // in-process timer that only ever acts while foregroundActivity is
-    // non-null (i.e. the app is actually on screen right now).
-    //
-    // This does NOT replace GraceDeadlineWorker — that still exists
-    // exactly as before for whenever the app is closed/backgrounded.
-    // This is a second, additive layer that only runs while the app is
-    // actually open, giving the "100% automatic while I'm using the
-    // app" behaviour that was asked for.
-    // ============================================================
-
     private val foregroundCheckHandler = Handler(Looper.getMainLooper())
-
-    // Only one auto-disable WebView is ever launched at a time. This
-    // timestamp prevents a second one from being launched again within
-    // the cooldown window, even if two poll cycles somehow overlap.
     private var lastAutoDisableLaunchAt = 0L
 
     companion object {
         private const val AUTO_DISABLE_POLL_INTERVAL_MS = 45_000L
         private const val AUTO_DISABLE_COOLDOWN_MS = 20_000L
+
+        @Volatile
+        var currentForegroundActivity: Activity? = null
+            private set
+
+        val isForeground: Boolean
+            get() = currentForegroundActivity != null
     }
 
     private val foregroundCheckRunnable = object : Runnable {

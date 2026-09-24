@@ -45,9 +45,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
     private var loginDone = false
     private var loginAttemptInProgress = false
     private var balanceReadStarted = false
-    private var dealerListStarted = false
-    private var dealerSearchStarted = false
-    private var creditStarted = false
+    private var dealerTopupStep = 0 // NEW: Track progress robustly
 
     companion object {
         private const val DOMAIN = "https://turbonet.zong.com.pk"
@@ -205,13 +203,20 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         }
 
         val savedCookie = getRenalaSessionCookie()
-        clearZongDomainCookies()
+        
+        // STRICT COOKIE PURGE: Erase any leftover cookies from other zones/sessions
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
 
         loginDone = false
         loginAttemptInProgress = false
 
         if (savedCookie.isNotBlank()) {
-            CookieManager.getInstance().setCookie(DOMAIN, savedCookie)
+            savedCookie.split(";").forEach { part ->
+                if (part.isNotBlank()) {
+                    CookieManager.getInstance().setCookie(DOMAIN, part.trim())
+                }
+            }
             CookieManager.getInstance().flush()
             webView.loadUrl(HOME_URL)
         } else {
@@ -222,6 +227,8 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
     private fun handlePage(url: String) {
         if (url.contains("login.php", ignoreCase = true)) {
             loginDone = false
+            dealerTopupStep = 0
+            balanceReadStarted = false
             if (!loginAttemptInProgress) {
                 webView.postDelayed({ tryLogin() }, 300)
             }
@@ -230,6 +237,30 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
 
         if (!url.contains(DOMAIN, ignoreCase = true)) return
 
+        // ACCOUNT ISOLATION GUARD: Ensure we didn't land on Okara's session
+        val expectedUsername = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", ZONE)
+        val okaraUsername = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
+        if (!expectedUsername.isNullOrBlank() && !okaraUsername.isNullOrBlank() && !okaraUsername.equals(expectedUsername, ignoreCase = true)) {
+            webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText.substring(0, 1000) : ''; })()") { bodyText ->
+                val text = bodyText ?: ""
+                if (text.contains(okaraUsername, ignoreCase = true)) {
+                    Log.w("ZongRenalaWebView", "Detected Okara session ($okaraUsername) in Renala WebView! Purging cookies and forcing re-login.")
+                    CookieManager.getInstance().removeAllCookies(null)
+                    CookieManager.getInstance().flush()
+                    loginDone = false
+                    dealerTopupStep = 0
+                    balanceReadStarted = false
+                    webView.loadUrl(LOGIN_URL)
+                    return@evaluateJavascript
+                }
+                proceedWithRenalaPage(url)
+            }
+        } else {
+            proceedWithRenalaPage(url)
+        }
+    }
+
+    private fun proceedWithRenalaPage(url: String) {
         saveRenalaSessionCookie()
 
         if (manualAction == "CHECK_BALANCE") {
@@ -243,27 +274,29 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
         if (manualAction == "DEALER_TOPUP") {
             when {
                 url.contains("sub_dealers.php", ignoreCase = true) -> {
-                    if (!dealerSearchStarted) {
-                        dealerSearchStarted = true
+                    if (dealerTopupStep < 1) {
+                        dealerTopupStep = 1
+                        Log.d("ZongRenalaWebView", "On Sub-Dealers page. Searching for dealer.")
                         webView.postDelayed({
                             searchAndClickZongDealer(
                                 dealerDisplayName ?: dealerSearchName ?: ""
                             )
-                        }, 700)
+                        }, 800)
                     }
                 }
 
                 url.contains("subdealer_portal.php", ignoreCase = true) -> {
-                    if (!creditStarted) {
-                        creditStarted = true
-                        webView.postDelayed({ openZongAddCreditAndFillAmount() }, 700)
+                    if (dealerTopupStep < 2) {
+                        dealerTopupStep = 2
+                        Log.d("ZongRenalaWebView", "On Dealer Portal. Opening Add Credit modal.")
+                        webView.postDelayed({ openZongAddCreditAndFillAmount() }, 1000)
                     }
                 }
 
                 else -> {
-                    if (!dealerListStarted) {
-                        dealerListStarted = true
-                        webView.postDelayed({ webView.loadUrl(DEALER_LIST_URL) }, 500)
+                    if (dealerTopupStep == 0 && !url.contains("sub_dealers.php") && !url.contains("subdealer_portal.php")) {
+                        Log.d("ZongRenalaWebView", "Redirecting to sub_dealers.php")
+                        webView.loadUrl(DEALER_LIST_URL)
                     }
                 }
             }
@@ -322,7 +355,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
 
         webView.evaluateJavascript(
             "(function(){" +
-                    "var inp=document.querySelector('input[aria-controls=\\\"table3\\\"]');" +
+                    "var inp=document.querySelector('input[aria-controls=\\\"table3\\\"], input[type=search]');" +
                     "if(!inp)return'not_found';" +
                     "inp.focus();" +
                     "inp.value='${safeName}';" +
@@ -412,6 +445,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                                 "})()"
                     ) { submitRaw ->
                         if (cleanJsResult(submitRaw) == "submitted") {
+                            dealerTopupStep = 3
                             webView.postDelayed({ captureDealerTopupResult() }, 2500)
                         }
                     }
@@ -428,13 +462,18 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
 
         webView.evaluateJavascript(
             "(function(){" +
-                    "var b=document.querySelector('button[data-target=\\\"#credit\\\"]');" +
+                    "var b=document.querySelector('button[data-target=\\\"#credit\\\"], button:contains(\\\"Add Credit\\\")');" +
+                    "if(!b) {" +
+                    "  var allBtns = document.querySelectorAll('button');" +
+                    "  for(var i=0; i<allBtns.length; i++) {" +
+                    "    if(allBtns[i].innerText.indexOf('Add Credit') > -1) { b = allBtns[i]; break; }" +
+                    "  }" +
+                    "}" +
                     "if(!b)return'not_found';" +
                     "b.click();return'opened';" +
                     "})()"
         ) { raw ->
             if (cleanJsResult(raw) != "opened") {
-                creditStarted = false
                 fail("Zong Renala Add Credit button not found.")
                 return@evaluateJavascript
             }
@@ -464,6 +503,7 @@ class ZongRenalaWebViewActivity : AppCompatActivity() {
                                         "})()"
                             ) { submitRaw ->
                                 if (cleanJsResult(submitRaw) == "submitted") {
+                                    dealerTopupStep = 3
                                     webView.postDelayed({ captureDealerTopupResult() }, 2500)
                                 }
                             }

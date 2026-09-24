@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/repeatSubHeaderLayout"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:background="@drawable/bg_decent_card"
+    android:gravity="center_vertical"
+    android:padding="10dp"
+    android:layout_marginStart="12dp"
+    android:layout_marginEnd="4dp"
+    android:layout_marginTop="4dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground">
+
+    <TextView
+        android:id="@+id/tvSubHeaderTitle"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Customer Name"
+        android:textColor="#212121"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- Repeat Count Badge -->
+    <TextView
+        android:id="@+id/tvBadgeRepeat"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="#FFF3E0"
+        android:paddingStart="8dp"
+        android:paddingTop="3dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="3dp"
+        android:text="Repeat ④"
+        android:textColor="#E65100"
+        android:textSize="11.5sp"
+        android:textStyle="bold" />
+
+    <!-- NC Count Badge -->
+    <TextView
+        android:id="@+id/tvBadgeNc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:background="#FFEBEE"
+        android:paddingStart="8dp"
+        android:paddingTop="3dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="3dp"
+        android:text="NC ②"
+        android:textColor="#C62828"
+        android:textSize="11.5sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvSubExpandIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:text="▼"
+        android:textColor="#546E7A"
+        android:textSize="12sp" />
+
+</LinearLayout>

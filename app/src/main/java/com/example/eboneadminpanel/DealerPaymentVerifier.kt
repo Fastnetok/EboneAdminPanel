@@ -30,6 +30,10 @@ object DealerPaymentVerifier {
     private const val CHANNEL_ID = "dealer_auto_transfer"
     private const val NOTIFICATION_ID_BASE = 740000
 
+    // Removed recentlyProcessedTids to prevent blocking after a Reset
+    private val dealerInfoCache = HashMap<String, Pair<String, String>>() // dealerId -> (name, zone)
+    private val dealerIspIdCache = HashMap<String, Map<String, String>>() // dealerId -> Map<isp, ispDealerId>
+
     fun verifyAndCredit(
         context: Context,
         transactionId: String,
@@ -39,15 +43,45 @@ object DealerPaymentVerifier {
     ) {
         val db = FirebaseFirestore.getInstance()
         val txRef = db.collection("dealerTransactions").document(transactionId)
+        val tid = (transactionData["bankTransactionId"] as? String)?.trim() ?: ""
 
-        // DIAGNOSTIC AUDIT TRAIL — purely additive, does not change any
-        // behavior. Records, permanently and visibly on the transaction
-        // document itself, every single time ANYTHING attempted to
-        // verify/credit this transaction: from where (source), and when.
-        // If a duplicate-processing bug ever happens again, open this
-        // transaction's "verifyAttemptLog" field — it will show exactly
-        // which trigger(s) fired and at what millisecond, which is the
-        // only way to know for certain instead of guessing.
+        // 1. STRICT DUPLICATE GUARD: Check if any other doc with SAME TID is already processed
+        if (tid.isNotEmpty()) {
+            db.collection("dealerTransactions")
+                .whereEqualTo("bankTransactionId", tid)
+                .whereIn("status", listOf("VERIFIED", "COMPLETED"))
+                .get()
+                .addOnSuccessListener { snp ->
+                    if (!snp.isEmpty && snp.documents.any { it.id != transactionId }) {
+                        Log.w(TAG, "Duplicate TID detected globally! Rejecting $transactionId")
+                        txRef.update(mapOf(
+                            "status" to "REJECTED_DUPLICATE",
+                            "duplicateMessage" to "This TID ($tid) was already verified in another record."
+                        ))
+                        onDone(false)
+                        return@addOnSuccessListener
+                    }
+                    // No duplicate found, proceed to normal verification
+                    performActualVerification(context, transactionId, transactionData, source, onDone)
+                }
+                .addOnFailureListener {
+                    performActualVerification(context, transactionId, transactionData, source, onDone)
+                }
+        } else {
+            performActualVerification(context, transactionId, transactionData, source, onDone)
+        }
+    }
+
+    private fun performActualVerification(
+        context: Context,
+        transactionId: String,
+        transactionData: Map<String, Any>,
+        source: String,
+        onDone: (Boolean) -> Unit
+    ) {
+        val db = FirebaseFirestore.getInstance()
+        val txRef = db.collection("dealerTransactions").document(transactionId)
+
         txRef.update(
             "verifyAttemptLog",
             FieldValue.arrayUnion(
@@ -274,19 +308,46 @@ object DealerPaymentVerifier {
         panel: String,
         amount: Double
     ) {
+        // QUICK CACHE CHECK to speed up Navigation Trigger
+        val cachedInfo = dealerInfoCache[dealerId]
+        val cachedIspIds = dealerIspIdCache[dealerId]
+        
+        if (cachedInfo != null && cachedIspIds != null) {
+            val ispDealerId = cachedIspIds[panel]
+            if (!ispDealerId.isNullOrEmpty()) {
+                Log.d(TAG, "Using cached dealer info for $dealerId to trigger navigation immediately.")
+                DealerTransferQueue.enqueue(
+                    context,
+                    DealerTransferQueue.PendingTransfer(
+                        transactionId = transactionId,
+                        dealerId = dealerId,
+                        dealerName = cachedInfo.first,
+                        panel = panel,
+                        ispDealerId = ispDealerId,
+                        zone = cachedInfo.second,
+                        amount = amount
+                    )
+                )
+                return
+            }
+        }
+
         FirebaseFirestore.getInstance()
             .collection("dealers")
             .document(dealerId)
             .get()
             .addOnSuccessListener { dealerDoc ->
-
-                val dealerName =
-                    dealerDoc.getString("name") ?: "Dealer"
-
-                val zone =
-                    dealerDoc.getString("zone")
-                        ?.ifBlank { null }
-                        ?: "Okara"
+                val dealerName = dealerDoc.getString("name") ?: "Dealer"
+                val zone = dealerDoc.getString("zone")?.takeIf { it.isNotBlank() } ?: "Okara"
+                
+                // Update Cache
+                dealerInfoCache[dealerId] = dealerName to zone
+                val ids = mapOf(
+                    "EBONE" to (dealerDoc.getString("eboneDealerId") ?: ""),
+                    "WATEEN" to (dealerDoc.getString("wateenDealerId") ?: ""),
+                    "ZONG" to (dealerDoc.getString("zongDealerId") ?: "")
+                )
+                dealerIspIdCache[dealerId] = ids
 
                 val ispIdField = when (panel) {
                     "WATEEN" -> "wateenDealerId"
@@ -294,16 +355,10 @@ object DealerPaymentVerifier {
                     else -> "eboneDealerId"
                 }
 
-                val ispDealerId =
-                    dealerDoc.getString(ispIdField)
-                        ?.trim()
-                        .orEmpty()
+                val ispDealerId = dealerDoc.getString(ispIdField)?.trim().orEmpty()
 
                 if (ispDealerId.isEmpty()) {
-                    markAutoTransferFailed(
-                        transactionId,
-                        "No $ispIdField configured for $dealerName"
-                    )
+                    markAutoTransferFailed(transactionId, "No $ispIdField configured for $dealerName")
                     return@addOnSuccessListener
                 }
 
@@ -321,10 +376,7 @@ object DealerPaymentVerifier {
                 )
             }
             .addOnFailureListener { error ->
-                markAutoTransferFailed(
-                    transactionId,
-                    "Could not load dealer: ${error.message}"
-                )
+                markAutoTransferFailed(transactionId, "Could not load dealer: ${error.message}")
             }
     }
 
@@ -352,13 +404,21 @@ object DealerPaymentVerifier {
         val amount = transfer.amount
 
         val targetActivity = WebViewRouter.getTargetActivity(panel, zone)
+        
+        // FORMAT: Remove trailing .0 from amount (e.g. 1500.0 -> 1500)
+        val formattedAmount = if (amount == amount.toLong().toDouble()) {
+            amount.toLong().toString()
+        } else {
+            amount.toString()
+        }
+
         val transferIntent =
             Intent(context, targetActivity).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra("selected_isp", panel)
                 putExtra("manual_action", "DEALER_TOPUP")
                 putExtra("dealer_ebone_id", ispDealerId)
-                putExtra("topup_amount", formatAmountForPanel(amount))
+                putExtra("topup_amount", formattedAmount)
                 putExtra("dealer_internal_id", dealerId)
                 putExtra("dealer_display_name", dealerName)
                 putExtra("target_zone", zone)
@@ -394,6 +454,21 @@ object DealerPaymentVerifier {
                 )
             )
             .addOnFailureListener { /* logging must never block the real flow */ }
+
+        val topActivity = EboneAdminApp.currentForegroundActivity
+        if (topActivity != null && !topActivity.isFinishing) {
+            try {
+                topActivity.startActivity(transferIntent)
+                Log.d(
+                    TAG,
+                    "DIRECT AUTO TRANSFER LAUNCHED via Top Activity (${topActivity.javaClass.simpleName}): " +
+                            "$dealerName ($zone/$panel) Rs.$amount txn=$transactionId"
+                )
+                return
+            } catch (e: Exception) {
+                Log.e(TAG, "Launch via top activity failed, trying context", e)
+            }
+        }
 
         if (isAppForeground(context)) {
             try {
@@ -521,17 +596,11 @@ object DealerPaymentVerifier {
      * only keeps a decimal for genuinely fractional amounts, e.g.
      * 1500.5 -> "1500.5".
      */
-    private fun formatAmountForPanel(amount: Double): String {
-        return if (amount == amount.toLong().toDouble()) {
-            amount.toLong().toString()
-        } else {
-            amount.toBigDecimal().stripTrailingZeros().toPlainString()
-        }
-    }
-
     private fun isAppForeground(
         context: Context
     ): Boolean {
+        if (EboneAdminApp.isForeground) return true
+
         val activityManager =
             context.getSystemService(Context.ACTIVITY_SERVICE)
                     as? ActivityManager

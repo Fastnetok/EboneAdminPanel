@@ -1,12 +1,15 @@
 package com.example.eboneadminpanel
 
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import java.util.Locale
 
 
 data class ReportHeaderData(
@@ -35,26 +38,18 @@ private const val TYPE_AREA_ITEM = 2
 
 class ReportAdapter(
     private val reportList: MutableList<ReportItem>,
-    private val onRepeatClick: () -> Unit = {}
+    private val onRepeatClick: () -> Unit = {},
+    private val onTotalComplaintsClick: () -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var headerData = ReportHeaderData()
     private var areaList: List<AreaReportItem> = emptyList()
 
-    /**
-     * Employee identity is based on a normalized employee name.
-     * This is a final UI-side safety net: even if the source list accidentally
-     * contains the same employee more than once (for example "Kashif", "kashif",
-     * or "Kashif "), only one employee card is rendered.
-     *
-     * If duplicates somehow exist, the record with the higher total assigned
-     * complaints is kept. Ties are broken by resolved count, then success rate.
-     */
     private fun normalizedEmployeeName(name: String): String {
         return name
             .trim()
             .replace(Regex("\\s+"), " ")
-            .lowercase(java.util.Locale.getDefault())
+            .lowercase(Locale.getDefault())
     }
 
     private fun uniqueEmployeeReports(): List<ReportItem> {
@@ -90,8 +85,6 @@ class ReportAdapter(
             }
         }
 
-        // Keep the report's existing order. For Monthly Reports this is already
-        // sorted by total complaints in ReportsActivity.
         return bestByEmployee.values.toList()
     }
 
@@ -171,7 +164,8 @@ class ReportAdapter(
             is HeaderViewHolder -> {
                 holder.bind(
                     headerData,
-                    onRepeatClick
+                    onRepeatClick,
+                    onTotalComplaintsClick
                 )
             }
 
@@ -211,7 +205,8 @@ class ReportAdapter(
 
         fun bind(
             data: ReportHeaderData,
-            onRepeatClick: () -> Unit
+            onRepeatClick: () -> Unit,
+            onTotalComplaintsClick: () -> Unit
         ) {
             topEmployeeText.text = data.topEmployeesText
             topEmployeeText.visibility =
@@ -228,6 +223,10 @@ class ReportAdapter(
                 } else {
                     View.GONE
                 }
+
+            overallSummaryText.setOnClickListener {
+                onTotalComplaintsClick()
+            }
 
             repeatReportText.text = data.repeatText
             repeatReportText.visibility =
@@ -407,7 +406,7 @@ class ReportAdapter(
         private val pendingChip: TextView =
             itemView.findViewById(R.id.pendingChip)
 
-        private val areaProgressBar: android.widget.ProgressBar =
+        private val areaProgressBar: ProgressBar =
             itemView.findViewById(R.id.areaProgressBar)
 
         private val areaPercentText: TextView =
@@ -424,7 +423,7 @@ class ReportAdapter(
             }
 
             rankBadge.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(
+                ColorStateList.valueOf(
                     Color.parseColor(badgeColor)
                 )
 
@@ -434,7 +433,7 @@ class ReportAdapter(
                 "Total: ${area.totalComplaints}"
 
             totalChip.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(
+                ColorStateList.valueOf(
                     Color.parseColor("#E3F2FD")
                 )
 
@@ -442,7 +441,7 @@ class ReportAdapter(
                 "Resolved: ${area.resolvedCount}"
 
             resolvedChip.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(
+                ColorStateList.valueOf(
                     Color.parseColor("#E8F5E9")
                 )
 
@@ -450,7 +449,7 @@ class ReportAdapter(
                 "Pending: ${area.pendingCount}"
 
             pendingChip.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(
+                ColorStateList.valueOf(
                     Color.parseColor("#FFF3E0")
                 )
 

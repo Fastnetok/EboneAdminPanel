@@ -62,7 +62,7 @@ object DealerPaymentSmsScanner {
             val todayStart = startOfTodayMillis()
             val matchWindowDays =
                 SmsMatchSettingsActivity.getMatchWindowDays(context)
-                    .coerceAtLeast(1)
+                    .coerceAtLeast(30)
 
             val cal = Calendar.getInstance()
             cal.timeInMillis = todayStart
@@ -156,7 +156,7 @@ object DealerPaymentSmsScanner {
                     listOf(tid, ocrTid)
                         .plus(referenceCandidates)
                         .map(::normalizeIdentifier)
-                        .filter { it.length >= 6 }
+                        .filter { it.isNotBlank() && it.length >= 4 }
                         .distinct()
 
                 var matchedIdentifier: String? = null
@@ -263,7 +263,7 @@ object DealerPaymentSmsScanner {
 
             val matchWindowDays =
                 SmsMatchSettingsActivity.getMatchWindowDays(context)
-                    .coerceAtLeast(1)
+                    .coerceAtLeast(30)
 
             val todayStart = startOfTodayMillis()
             val cal = Calendar.getInstance()
@@ -334,7 +334,7 @@ object DealerPaymentSmsScanner {
                     listOf(tid, ocrTid)
                         .plus(referenceCandidates)
                         .map(::normalizeIdentifier)
-                        .filter { it.isNotBlank() }
+                        .filter { it.isNotBlank() && it.length >= 4 }
                         .distinct()
 
                 var matchedIdentifier: String? = null
@@ -342,7 +342,7 @@ object DealerPaymentSmsScanner {
 
                 matchedEntry = smsEntries.firstOrNull { sms ->
                     val hit = candidateIdentifiers.firstOrNull { identifier ->
-                        identifier.length >= 6 &&
+                        identifier.length >= 4 &&
                                 sms.normalizedBody.contains(identifier)
                     }
                     if (hit != null) {

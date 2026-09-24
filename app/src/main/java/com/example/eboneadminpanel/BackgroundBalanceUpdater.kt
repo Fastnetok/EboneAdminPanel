@@ -74,20 +74,14 @@ object BackgroundBalanceUpdater {
                 else -> "https://partner.ebill.pk"
             }
 
-            // Isolated cleanup for this domain before poking
+            // Isolated cleanup before restoring session cookie
             val cm = CookieManager.getInstance()
-            val existing = cm.getCookie(domain)
-            if (existing != null) {
-                existing.split(";").forEach { part ->
-                    val name = part.trim().substringBefore("=")
-                    if (name.isNotBlank()) cm.setCookie(domain, "$name=; Max-Age=0")
-                }
-                cm.flush()
-            }
+            cm.removeAllCookies(null)
+            cm.flush()
 
             if (savedCookie.isNotEmpty()) {
                 savedCookie.split(";").forEach { part ->
-                    cm.setCookie(domain, part.trim())
+                    if (part.isNotBlank()) cm.setCookie(domain, part.trim())
                 }
                 cm.flush()
             }

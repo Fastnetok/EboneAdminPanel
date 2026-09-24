@@ -190,7 +190,8 @@ class EboneWebViewActivity : AppCompatActivity() {
     private fun handlePageLoaded(url: String) {
         when {
             url.contains("logincheck") || url.contains("login") -> {
-                loginDone = false; loginAttemptInProgress = false; tryAutoLogin()
+                loginDone = false; loginAttemptInProgress = false
+                tryAutoLogin()
             }
             url.contains("/clients/clientChange/") && manualAction != null -> {
                 prepareEbonePasswordAction()
@@ -244,9 +245,11 @@ class EboneWebViewActivity : AppCompatActivity() {
                         performVisualAutoResolve("input[aria-controls=\"example1\"]", "Online Customers")
                     }
                 } else if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
-                    webView.postDelayed({
-                        webView.loadUrl("https://partner.ebill.pk/payments/addbalance/${dealerEboneId}")
-                    }, 300)
+                    if (!eboneTopupSubmitAttempted) {
+                        webView.postDelayed({
+                            webView.loadUrl("https://partner.ebill.pk/payments/addbalance/${dealerEboneId}")
+                        }, 300)
+                    }
                 } else if (manualAction == "CHECK_BALANCE") {
                     if (!eboneBalanceCheckAttempted) {
                         eboneBalanceCheckAttempted = true
@@ -262,15 +265,21 @@ class EboneWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
-        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "EBONE", targetZone)
+        // Purge any stale cookies from other ISP / Zone sessions
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+
+        val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, selectedIsp, targetZone)
         if (!ispUsername.isNullOrEmpty()) {
-            val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("EBONE_$targetZone", "") ?: ""
+            val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("${selectedIsp}_$targetZone", "") ?: ""
             if (savedCookie.isNotEmpty()) {
+                Log.d("EboneWebView", "Loading with saved cookie for $selectedIsp / $targetZone")
+                val domainUrl = "https://partner.ebill.pk"
                 savedCookie.split(";").forEach {
-                    CookieManager.getInstance().setCookie("https://partner.ebill.pk", it.trim())
+                    if (it.isNotBlank()) CookieManager.getInstance().setCookie(domainUrl, it.trim())
                 }
                 CookieManager.getInstance().flush()
-                webView.loadUrl("https://partner.ebill.pk/clients")
+                webView.loadUrl("$domainUrl/clients")
             } else {
                 webView.loadUrl("https://partner.ebill.pk/logincheck")
             }
@@ -353,8 +362,8 @@ class EboneWebViewActivity : AppCompatActivity() {
                 if (result == "fields_not_ready" && attempt < 6) {
                     doLoginWith(username, password, attempt + 1)
                 } else {
-                    loginDone = (result == "submitted" || result == "submitted_no_button")
                     loginAttemptInProgress = false
+                    Log.d("EboneWebView", "Login submission attempted. Waiting for dashboard...")
                 }
             }
         }, 300L)

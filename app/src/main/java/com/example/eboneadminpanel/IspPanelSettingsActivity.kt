@@ -99,9 +99,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
                         !obj.optBoolean("isDealer", false) && 
-                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
+                        accountZone(obj).equals(zone, ignoreCase = true)) {
                         return obj.getString("username")
                     }
                 } catch (_: Exception) { }
@@ -112,7 +112,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 for (i in 0 until arr.length()) {
                     try {
                         val obj = arr.getJSONObject(i)
-                        if (obj.getString("isp") == isp && 
+                        if (obj.optString("isp").equals(isp, ignoreCase = true) && 
                             !obj.optBoolean("isDealer", false) && 
                             !obj.has("zone")) {
                             return obj.getString("username")
@@ -125,9 +125,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
                         obj.optBoolean("isDealer", false) && 
-                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
+                        accountZone(obj).equals(zone, ignoreCase = true)) {
                         return obj.getString("username")
                     }
                 } catch (_: Exception) { }
@@ -146,9 +146,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
                         !obj.optBoolean("isDealer", false) && 
-                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
+                        accountZone(obj).equals(zone, ignoreCase = true)) {
                         return obj.getString("password")
                     }
                 } catch (_: Exception) { }
@@ -158,7 +158,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 for (i in 0 until arr.length()) {
                     try {
                         val obj = arr.getJSONObject(i)
-                        if (obj.getString("isp") == isp && 
+                        if (obj.optString("isp").equals(isp, ignoreCase = true) && 
                             !obj.optBoolean("isDealer", false) && 
                             !obj.has("zone")) {
                             return obj.getString("password")
@@ -170,9 +170,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp && 
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) && 
                         obj.optBoolean("isDealer", false) && 
-                        obj.optString("zone", "").equals(zone, ignoreCase = true)) {
+                        accountZone(obj).equals(zone, ignoreCase = true)) {
                         return obj.getString("password")
                     }
                 } catch (_: Exception) { }
@@ -195,9 +195,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp &&
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
                         obj.optBoolean("isDealer", false) &&
-                        accountZone(obj) == zone &&
+                        accountZone(obj).equals(zone, ignoreCase = true) &&
                         obj.optString("dealerName", "").equals(dealerName, ignoreCase = true)
                     ) {
                         return obj.getString("username")
@@ -214,9 +214,9 @@ class IspPanelSettingsActivity : AppCompatActivity() {
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
-                    if (obj.getString("isp") == isp &&
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
                         obj.optBoolean("isDealer", false) &&
-                        accountZone(obj) == zone &&
+                        accountZone(obj).equals(zone, ignoreCase = true) &&
                         obj.optString("dealerName", "").equals(dealerName, ignoreCase = true)
                     ) {
                         return obj.getString("password")

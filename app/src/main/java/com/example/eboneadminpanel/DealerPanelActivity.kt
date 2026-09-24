@@ -30,9 +30,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.gms.tasks.Task
+import com.google.android.gms.tasks.Tasks
+import androidx.core.util.Pair as AndroidPair
+import com.google.android.material.datepicker.MaterialDatePicker
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,7 +61,8 @@ class DealerPanelActivity : AppCompatActivity() {
 
     private var dealerCount = 0
     private var totalBalance = 0.0
-    private var activeStatFilter: String? = null // NEW: tracks which top card is selected
+    private var activeStatFilter: String? = null 
+    private val dealersWithPending = HashSet<String>() // NEW: IDs of dealers with pending txn
 
     private val dealerNameCache = HashMap<String, String>()
 
@@ -415,8 +422,21 @@ class DealerPanelActivity : AppCompatActivity() {
                     val wateen = document.getDouble("wateenBalance") ?: 0.0
                     val ebone = document.getDouble("eboneBalance") ?: 0.0
                     val zong = document.getDouble("zongBalance") ?: 0.0
-                    totalBalance += wateen + ebone + zong
-                    dealerNameCache[document.id] = document.getString("name") ?: document.id
+                    val combined = wateen + ebone + zong
+                    totalBalance += combined
+                    dealerNameCache[document.id] = name.ifBlank { document.id }
+
+                    // Filtering Logic for Cards
+                    when (activeStatFilter) {
+                        "DEALERS" -> { /* show all */ }
+                        "PENDING" -> {
+                            if (!dealersWithPending.contains(document.id)) return@forEach
+                        }
+                        "TOTAL" -> {
+                            if (combined <= 0) return@forEach
+                        }
+                    }
+
                     dealerList.addView(dealerCard(document.id, document, index++))
                 }
 
@@ -426,10 +446,12 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun dealerCard(dealerId: String, document: DocumentSnapshot, index: Int): LinearLayout {
+        val name = document.getString("name") ?: ""
         val wateen = document.getDouble("wateenBalance") ?: 0.0
         val ebone = document.getDouble("eboneBalance") ?: 0.0
         val zong = document.getDouble("zongBalance") ?: 0.0
         val isActive = (document.getString("status") ?: "ACTIVE") == "ACTIVE"
+        val zone = document.getString("zone")?.takeIf { it.isNotBlank() } ?: "Okara"
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -442,10 +464,20 @@ class DealerPanelActivity : AppCompatActivity() {
             elevation = dp(1).toFloat()
             layoutParams = LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = dp(10) }
             isClickable = true
-            setOnClickListener { showDealerDetails(dealerId) }
+            setOnClickListener { showDealerLedger(dealerId, name, zone) }
         }
 
         val topRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        
+        // Numbering
+        topRow.addView(TextView(this).apply {
+            text = "$index."
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(textMuted)
+            setPadding(0, 0, dp(8), 0)
+        })
+
         topRow.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(dp(10), dp(10)).also { it.marginEnd = dp(10) }
             background = pill(if (isActive) green else Color.parseColor("#D92D20"), 10)
@@ -454,7 +486,7 @@ class DealerPanelActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             addView(TextView(this@DealerPanelActivity).apply {
-                text = document.getString("name") ?: ""
+                text = name
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(textDark)
@@ -465,7 +497,7 @@ class DealerPanelActivity : AppCompatActivity() {
                 setTextColor(textMuted)
             })
         })
-        val zone = document.getString("zone")?.ifBlank { null } ?: "Okara"
+        
         val zoneColor = if (zone == "Okara") navyMid else purple
         topRow.addView(TextView(this).apply {
             text = zone
@@ -486,6 +518,22 @@ class DealerPanelActivity : AppCompatActivity() {
         badgeRow.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(8), 1) })
         badgeRow.addView(networkBalanceBadge("Zong", zong, purple))
         card.addView(badgeRow)
+
+        // Reset Button at bottom of card
+        val actionRow = LinearLayout(this).apply {
+            gravity = Gravity.END
+            setPadding(0, dp(8), 0, 0)
+        }
+        actionRow.addView(TextView(this).apply {
+            text = "Reset Balance 🔄"
+            textSize = 11f
+            setTextColor(Color.parseColor("#C62828"))
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = outlinedPill(Color.parseColor("#FEF2F2"), Color.parseColor("#FEE2E2"), 8)
+            setOnClickListener { resetDealerBalance(dealerId, name, zone) }
+        })
+        card.addView(actionRow)
 
         return card
     }
@@ -528,6 +576,17 @@ class DealerPanelActivity : AppCompatActivity() {
                 }
 
                 statPendingText.text = relevantDocs.size.toString()
+                
+                // NEW: Update dealersWithPending set
+                dealersWithPending.clear()
+                relevantDocs.forEach { doc ->
+                    doc.getString("dealerId")?.let { dealersWithPending.add(it) }
+                }
+                
+                // If the stat filter is PENDING, we need to refresh the dealer list too
+                if (activeStatFilter == "PENDING" || activeStatFilter == "TOTAL" || activeStatFilter == null) {
+                    observeDealers() 
+                }
 
                 if (relevantDocs.isEmpty()) {
                     pendingList.addView(emptyState("No pending dealer payments"))
@@ -618,13 +677,24 @@ class DealerPanelActivity : AppCompatActivity() {
     }
 
     private fun deletePendingPayment(transactionId: String) {
-        db.collection("dealerTransactions").document(transactionId).delete()
-            .addOnSuccessListener {
-                Toast.makeText(this, "Payment record deleted", Toast.LENGTH_SHORT).show()
+        db.collection("dealerTransactions").document(transactionId).get().addOnSuccessListener { doc ->
+            val tid = doc.getString("bankTransactionId") ?: ""
+            db.collection("dealerTransactions").document(transactionId).delete()
+            if (tid.isNotBlank()) {
+                val cleanTid = tid.filter { it.isLetterOrDigit() }.uppercase()
+                db.collection("paymentClaims").whereEqualTo("identifier", cleanTid).get()
+                    .addOnSuccessListener { claims ->
+                        claims.documents.forEach { it.reference.delete() }
+                    }
             }
-            .addOnFailureListener { e ->
-                Toast.makeText(this, "Delete failed: ${e.message}", Toast.LENGTH_LONG).show()
-            }
+            db.collection("paymentClaims").whereEqualTo("transactionId", transactionId).get()
+                .addOnSuccessListener { claims ->
+                    claims.documents.forEach { it.reference.delete() }
+                }
+            Toast.makeText(this, "Payment record deleted", Toast.LENGTH_SHORT).show()
+        }.addOnFailureListener {
+            db.collection("dealerTransactions").document(transactionId).delete()
+        }
     }
 
     private fun swipeToDeleteWrapper(contentRow: LinearLayout, onDelete: () -> Unit): FrameLayout {
@@ -1342,6 +1412,264 @@ class DealerPanelActivity : AppCompatActivity() {
             val dealer = mapOf("dealerId" to dealerId, "name" to name, "mobile" to mobile, "dealerCode" to code, "deviceId" to "", "status" to "ACTIVE", "zone" to zone, "wateenBalance" to 0.0, "eboneBalance" to 0.0, "zongBalance" to 0.0, "eboneDealerId" to eboneIdInput.text.toString().trim(), "wateenDealerId" to wateenIdInput.text.toString().trim(), "zongDealerId" to zongIdInput.text.toString().trim(), "paymentAccounts" to paymentAccountNames.associateWith { true }, "createdAt" to System.currentTimeMillis())
             db.collection("dealers").document(dealerId).set(dealer).addOnSuccessListener { Toast.makeText(this, "Dealer created. Code: $code", Toast.LENGTH_LONG).show() }.addOnFailureListener { error -> Toast.makeText(this, "Dealer creation failed: ${error.message}", Toast.LENGTH_LONG).show() }
         }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun resetDealerBalance(dealerId: String, name: String, zone: String) {
+        AlertDialog.Builder(this)
+            .setTitle("PERMANENT RESET: $name")
+            .setMessage("⚠ CAUTION: This will permanently:\n" +
+                    "1. Delete all Payment Logs\n" +
+                    "2. Delete all Transactions\n" +
+                    "3. Clear all Payment Claims (TIDs)\n" +
+                    "4. Set Wallet Balance to zero\n\n" +
+                    "This allows the dealer to re-upload and re-apply for the same payments. Proceed?")
+            .setPositiveButton("Reset Everything") { _, _ ->
+                val progress = ProgressBar(this).apply { isIndeterminate = true }
+                val diag = AlertDialog.Builder(this).setTitle("Resetting...").setView(progress).setCancelable(false).show()
+
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        val batch = db.batch()
+                        
+                        // 1. Reset Balance in dealers doc
+                        val dealerRef = db.collection("dealers").document(dealerId)
+                        batch.update(dealerRef, mapOf(
+                            "eboneBalance" to 0.0,
+                            "wateenBalance" to 0.0,
+                            "zongBalance" to 0.0
+                        ))
+
+                        // 2. Clear dealerPayments
+                        val paySnap = Tasks.await(db.collection("dealerPayments").whereEqualTo("dealerId", dealerId).get())
+                        paySnap.documents.forEach { batch.delete(it.reference) }
+
+                        // 3. Clear dealerTransactions
+                        val txnSnap = Tasks.await(db.collection("dealerTransactions").whereEqualTo("dealerId", dealerId).get())
+                        txnSnap.documents.forEach { batch.delete(it.reference) }
+
+                        // 4. Clear paymentClaims (Matching TIDs)
+                        val claimSnap = Tasks.await(db.collection("paymentClaims").whereEqualTo("ownerId", dealerId).get())
+                        claimSnap.documents.forEach { batch.delete(it.reference) }
+
+                        // Commit all deletions at once
+                        Tasks.await(batch.commit())
+
+                        runOnUiThread {
+                            diag.dismiss()
+                            Toast.makeText(this@DealerPanelActivity, "$name has been fully reset and synced.", Toast.LENGTH_LONG).show()
+                            // observeDealers() is not needed as Batch update will trigger SnapshotListener
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            diag.dismiss()
+                            Toast.makeText(this@DealerPanelActivity, "Reset failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showDealerLedger(dealerId: String, name: String, zone: String) {
+        val ledgerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            setBackgroundColor(Color.WHITE)
+        }
+
+        val title = TextView(this).apply {
+            text = "Ledger: $name ($zone)"
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(textDark)
+            setPadding(0, 0, 0, dp(16))
+        }
+        ledgerLayout.addView(title)
+
+        val resultContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(16), 0, 0)
+        }
+
+        val filterRow = LinearLayout(this).apply { 
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val dateBtn = Button(this).apply {
+            text = "🗓️ Range"
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).also { it.marginEnd = dp(4) }
+            setOnClickListener { openLedgerDatePicker(dealerId, resultContainer) }
+        }
+        val thirtyDaysBtn = Button(this).apply {
+            text = "30 Days"
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).also { it.marginEnd = dp(4) }
+            setOnClickListener { loadLedgerForRange(dealerId, resultContainer, System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000), System.currentTimeMillis()) }
+        }
+        val resetBtn = Button(this).apply {
+            text = "Reset 🔄"
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#C62828"))
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            setOnClickListener { resetDealerBalance(dealerId, name, zone) }
+        }
+        filterRow.addView(dateBtn)
+        filterRow.addView(thirtyDaysBtn)
+        filterRow.addView(resetBtn)
+        ledgerLayout.addView(filterRow)
+
+        ledgerLayout.addView(resultContainer)
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(ledgerLayout)
+            .setNegativeButton("Close", null)
+            .setNeutralButton("Settings") { _, _ -> showDealerDetails(dealerId) }
+            .create()
+        dialog.show()
+            
+        // Initial load: Last 30 days
+        loadLedgerForRange(dealerId, resultContainer, System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000), System.currentTimeMillis())
+    }
+
+    private fun openLedgerDatePicker(dealerId: String, container: LinearLayout) {
+        val builder = MaterialDatePicker.Builder.dateRangePicker()
+        builder.setTitleText("Select Ledger Dates")
+        val picker = builder.build()
+        picker.show(supportFragmentManager, "LEDGER_RANGE")
+        picker.addOnPositiveButtonClickListener { selection ->
+            val start = selection.first
+            val end = selection.second + (24 * 60 * 60 * 1000) - 1
+            loadLedgerForRange(dealerId, container, start, end)
+        }
+    }
+
+    private fun loadLedgerForRange(dealerId: String, container: LinearLayout, start: Long, end: Long) {
+        container.removeAllViews()
+        container.addView(ProgressBar(this).apply { layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).also { it.gravity = Gravity.CENTER } })
+
+        val df = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+        
+        // Data class for merged records
+        data class LedgerEntry(val type: String, val panel: String, val amount: Double, val date: Long)
+        val allEntries = mutableListOf<LedgerEntry>()
+
+        val tasks = mutableListOf<Task<QuerySnapshot>>()
+        
+        // 1. dealerPayments
+        tasks.add(db.collection("dealerPayments")
+            .whereEqualTo("dealerId", dealerId)
+            .whereGreaterThanOrEqualTo("submittedAt", start)
+            .whereLessThanOrEqualTo("submittedAt", end)
+            .get())
+
+        // 2. dealerTransactions (Completed ones)
+        tasks.add(db.collection("dealerTransactions")
+            .whereEqualTo("dealerId", dealerId)
+            .whereEqualTo("status", "COMPLETED")
+            .whereGreaterThanOrEqualTo("submittedAt", start)
+            .whereLessThanOrEqualTo("submittedAt", end)
+            .get())
+
+        // 3. paymentClaims (Dealer claims)
+        tasks.add(db.collection("paymentClaims")
+            .whereEqualTo("ownerId", dealerId)
+            .whereEqualTo("ownerType", "DEALER")
+            .whereGreaterThanOrEqualTo("submittedAt", start)
+            .whereLessThanOrEqualTo("submittedAt", end)
+            .get())
+
+        Tasks.whenAllComplete(tasks).addOnSuccessListener {
+            container.removeAllViews()
+            
+            tasks.forEachIndexed { index, task ->
+                if (task.isSuccessful) {
+                    task.result?.documents?.forEach { doc ->
+                        val amt = doc.getDouble("amount") ?: 0.0
+                        val date = doc.getLong("submittedAt") ?: 0L
+                        val type = when(index) {
+                            0 -> "Payment"
+                            1 -> "Txn"
+                            else -> "Claim"
+                        }
+                        val panel = when(index) {
+                            2 -> doc.getString("paymentSource") ?: ""
+                            else -> doc.getString("panel") ?: ""
+                        }
+                        allEntries.add(LedgerEntry(type, panel, amt, date))
+                    }
+                }
+            }
+
+            allEntries.sortByDescending { it.date }
+
+            if (allEntries.isEmpty()) {
+                container.addView(TextView(this).apply { text = "No records found for this dealer."; gravity = Gravity.CENTER; setPadding(0, dp(40), 0, 0) })
+                return@addOnSuccessListener
+            }
+
+            var total = 0.0
+            allEntries.forEach { entry ->
+                total += entry.amount
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, dp(10), 0, dp(10))
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                
+                val typeTag = TextView(this).apply {
+                    text = entry.type
+                    textSize = 9f
+                    setTextColor(Color.WHITE)
+                    setPadding(dp(6), dp(2), dp(6), dp(2))
+                    background = pill(when(entry.type) {
+                        "Payment" -> orange
+                        "Txn" -> navyMid
+                        else -> purple
+                    }, 4)
+                    layoutParams = LinearLayout.LayoutParams(-2, -2).also { it.marginEnd = dp(8) }
+                }
+                row.addView(typeTag)
+
+                val details = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                }
+                details.addView(TextView(this@DealerPanelActivity).apply {
+                    text = "${entry.panel} Panel"
+                    textSize = 13f
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(textDark)
+                })
+                details.addView(TextView(this@DealerPanelActivity).apply {
+                    text = df.format(Date(entry.date))
+                    textSize = 11f
+                    setTextColor(textMuted)
+                })
+                row.addView(details)
+
+                row.addView(TextView(this).apply {
+                    text = "Rs. ${"%,.0f".format(entry.amount)}"
+                    textSize = 14f
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(green)
+                })
+                
+                container.addView(row)
+                container.addView(View(this).apply { layoutParams = LinearLayout.LayoutParams(-1, dp(1)); setBackgroundColor(Color.parseColor("#F2F4F7")) })
+            }
+
+            container.addView(TextView(this).apply {
+                text = "Total Record: Rs. ${"%,.0f".format(total)}"
+                textSize = 16f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(textDark)
+                gravity = Gravity.END
+                setPadding(0, dp(16), 0, dp(8))
+            })
+        }
     }
 
     private fun showDealerDetails(dealerId: String) {

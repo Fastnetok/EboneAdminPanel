@@ -193,42 +193,22 @@ object DealerAutoTransferProcessor {
                                             Intent.FLAG_ACTIVITY_CLEAR_TOP
                                 )
 
-                                /*
-                                 * EXACTLY the entry-point extras already used
-                                 * by the stable WebView automation.
-                                 */
-                                putExtra(
-                                    "selected_isp",
-                                    panel
-                                )
-                                putExtra(
-                                    "manual_action",
-                                    "DEALER_TOPUP"
-                                )
-                                putExtra(
-                                    "dealer_ebone_id",
-                                    ispDealerId
-                                )
-                                putExtra(
-                                    "topup_amount",
+                                putExtra("selected_isp", panel)
+                                putExtra("manual_action", "DEALER_TOPUP")
+                                putExtra("dealer_ebone_id", ispDealerId)
+                                
+                                // FORMAT: Remove trailing .0 from amount (e.g. 1500.0 -> 1500)
+                                val formattedAmount = if (amount == amount.toLong().toDouble()) {
+                                    amount.toLong().toString()
+                                } else {
                                     amount.toString()
-                                )
-                                putExtra(
-                                    "dealer_internal_id",
-                                    dealerId
-                                )
-                                putExtra(
-                                    "dealer_display_name",
-                                    dealerName
-                                )
-                                putExtra(
-                                    "target_zone",
-                                    zone
-                                )
-                                putExtra(
-                                    "source_transaction_id",
-                                    transactionId
-                                )
+                                }
+                                putExtra("topup_amount", formattedAmount)
+                                
+                                putExtra("dealer_internal_id", dealerId)
+                                putExtra("dealer_display_name", dealerName)
+                                putExtra("target_zone", zone)
+                                putExtra("source_transaction_id", transactionId)
                             }
 
                         /*
@@ -236,6 +216,21 @@ object DealerAutoTransferProcessor {
                          * launch directly. This is the most reliable path and
                          * does not depend on notification/full-screen intent.
                          */
+                        val topActivity = EboneAdminApp.currentForegroundActivity
+                        if (topActivity != null && !topActivity.isFinishing) {
+                            try {
+                                topActivity.startActivity(launchIntent)
+                                Log.d(
+                                    TAG,
+                                    "DIRECT AUTO TRIGGER STARTED via Top Activity (${topActivity.javaClass.simpleName}): " +
+                                            "$panel / $dealerName / Rs.$amount / zone=$zone / txn=$transactionId"
+                                )
+                                return@addOnSuccessListener
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Launch via top activity failed", e)
+                            }
+                        }
+
                         if (isAppForeground(context)) {
                             try {
                                 context.startActivity(
@@ -300,6 +295,8 @@ object DealerAutoTransferProcessor {
     private fun isAppForeground(
         context: Context
     ): Boolean {
+        if (EboneAdminApp.isForeground) return true
+
         val activityManager =
             context.getSystemService(Context.ACTIVITY_SERVICE)
                     as? ActivityManager

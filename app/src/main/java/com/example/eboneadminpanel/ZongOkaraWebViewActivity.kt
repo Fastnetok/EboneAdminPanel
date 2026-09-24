@@ -31,8 +31,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private var loginAttemptInProgress = false
     private var loginDone = false
     private var balanceCheckAttempted = false
-    private var dealerListLoadAttempted = false
-    private var dealerTopupAttempted = false
+    private var dealerTopupStep = 0 // 0: Start, 1: Searching, 2: Filling, 3: Submitted
     private var sourceTransactionId: String? = null
 
     private var manualAction: String? = null
@@ -43,7 +42,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private var dealerSearchName: String? = null
     private var autoActivateCustomerId: String? = null
     private var zongDetailsFetchDone = false
-    private var isCustomerSearchStarted = false // NEW: Proper tracking flag
+    private var isCustomerSearchStarted = false 
     private var customerListPrepared = false
 
     private val domain = "https://turbonet.zong.com.pk"
@@ -52,6 +51,18 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private val dealerListUrl = "$domain/sub_dealers.php"
 
     private val sessionPrefsName = "isp_session_cookies"
+
+    private fun clearZongDomainCookies() {
+        val cm = CookieManager.getInstance()
+        val existing = cm.getCookie(domain) ?: return
+        existing.split(";")
+            .map { it.trim().substringBefore("=") }
+            .filter { it.isNotBlank() }
+            .forEach { name ->
+                cm.setCookie(domain, "$name=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT")
+            }
+        cm.flush()
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,14 +135,23 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private fun handlePage(url: String) {
         when {
             url.contains("login.php") -> {
+                Log.d("ZongOkaraWebView", "Login page detected.")
                 loginDone = false
-                isCustomerSearchStarted = false // Reset on login
+                isCustomerSearchStarted = false 
                 customerListPrepared = false
+                dealerTopupStep = 0
                 if (!loginAttemptInProgress) tryAutoLogin()
             }
 
             url.contains("customer_portal.php") -> {
-                if (manualAction == null) {
+                if (manualAction == "DEALER_TOPUP") {
+                    // Only redirect if we haven't reached the submit step
+                    if (dealerTopupStep < 2) {
+                        Log.d("ZongOkaraWebView", "Landed on profile during Topup. Redirecting to Dealer List.")
+                        webView.loadUrl(dealerListUrl)
+                    }
+                } else {
+                    // Normal Complaints flow
                     if (isCustomerSearchStarted) {
                         Log.d("ZongOkaraWebView", "Customer profile reached. Fetching details...")
                         webView.postDelayed({ fetchZongCustomerDetails() }, 1500)
@@ -151,36 +171,67 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             }
 
             url.contains("sub_dealers.php") && manualAction == "DEALER_TOPUP" -> {
-                if (!dealerListLoadAttempted) {
-                    dealerListLoadAttempted = true
+                if (dealerTopupStep < 1) {
+                    dealerTopupStep = 1
+                    Log.d("ZongOkaraWebView", "On Sub-Dealers page. Searching for dealer.")
                     webView.postDelayed({ searchAndClickZongDealer(dealerSearchName ?: dealerDisplayName ?: "") }, 800)
                 }
             }
 
             url.contains("subdealer_portal.php") && manualAction == "DEALER_TOPUP" -> {
-                if (!dealerTopupAttempted) {
-                    dealerTopupAttempted = true
-                    webView.postDelayed({ openZongAddCreditAndSubmit(topupAmount ?: "") }, 800)
+                if (dealerTopupStep < 2) {
+                    dealerTopupStep = 2
+                    Log.d("ZongOkaraWebView", "On Dealer Portal. Opening Add Credit modal.")
+                    webView.postDelayed({ openZongAddCreditAndSubmit(topupAmount ?: "") }, 1000)
                 }
             }
 
             url.contains("turbonet.zong.com.pk") && !url.contains("login.php") -> {
-                loginDone = true
-                if (manualAction == "DEALER_TOPUP") {
-                    if (!customerListPrepared) {
-                        customerListPrepared = true
-                        webView.loadUrl(dealerListUrl)
+                // ACCOUNT ISOLATION GUARD: Ensure we didn't land on Renala's session
+                val expectedUsername = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
+                val renalaUsername = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Renala")
+                if (!expectedUsername.isNullOrBlank() && !renalaUsername.isNullOrBlank() && !renalaUsername.equals(expectedUsername, ignoreCase = true)) {
+                    webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText.substring(0, 1000) : ''; })()") { bodyText ->
+                        val text = bodyText ?: ""
+                        if (text.contains(renalaUsername, ignoreCase = true)) {
+                            Log.w("ZongOkaraWebView", "Detected Renala session ($renalaUsername) in Okara WebView! Purging cookies and forcing re-login.")
+                            CookieManager.getInstance().removeAllCookies(null)
+                            CookieManager.getInstance().flush()
+                            loginDone = false
+                            dealerTopupStep = 0
+                            balanceCheckAttempted = false
+                            webView.loadUrl(loginUrl)
+                            return@evaluateJavascript
+                        }
+                        proceedWithOkaraPage(url)
                     }
-                } else if (manualAction == "CHECK_BALANCE") {
-                    if (!balanceCheckAttempted) {
-                        balanceCheckAttempted = true
-                        webView.postDelayed({ readZongOkaraBalance() }, 700)
-                    }
-                } else if (manualAction == null && !url.contains("customers.php") && !url.contains("customer_portal.php")) {
-                    Log.d("ZongOkaraWebView", "Redirecting to customers.php")
-                    webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
+                } else {
+                    proceedWithOkaraPage(url)
                 }
             }
+        }
+    }
+
+    private fun proceedWithOkaraPage(url: String) {
+        loginDone = true
+        
+        // Save session cookie for Okara isolation
+        val current = CookieManager.getInstance().getCookie(domain)
+        if (!current.isNullOrBlank()) saveSessionCookie(current)
+
+        if (manualAction == "DEALER_TOPUP") {
+            if (dealerTopupStep == 0 && !url.contains("sub_dealers.php") && !url.contains("subdealer_portal.php")) {
+                Log.d("ZongOkaraWebView", "Starting Topup flow from Dashboard.")
+                webView.loadUrl(dealerListUrl)
+            }
+        } else if (manualAction == "CHECK_BALANCE") {
+            if (!balanceCheckAttempted) {
+                balanceCheckAttempted = true
+                webView.postDelayed({ readZongOkaraBalance() }, 700)
+            }
+        } else if (manualAction == null && !url.contains("customers.php") && !url.contains("customer_portal.php")) {
+            Log.d("ZongOkaraWebView", "Redirecting to customers.php for Complaints")
+            webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
         }
     }
 
@@ -239,6 +290,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                             "    var t = (links[i].innerText || links[i].textContent || '').trim();" +
                             "    if(t === '$customerId'){ links[i].click(); found = true; break; }" +
                             "  }" +
+                            "  if(!found && links.length > 0) { links[0].click(); found = true; }" + // Fallback to first result if ID matches partially
                             "  return found ? 'clicked' : 'not_found_on_page';" +
                             "})()"
                 ) { result ->
@@ -325,16 +377,21 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         }
 
         val savedCookie = getSessionCookie()
-        CookieManager.getInstance().removeAllCookies {
-            if (savedCookie.isNotBlank()) {
-                Log.d("ZongOkaraWebView", "Restoring Okara session cookie")
-                savedCookie.split(";").forEach { part -> CookieManager.getInstance().setCookie(domain, part.trim()) }
-                CookieManager.getInstance().flush()
-                webView.loadUrl(homeUrl)
-            } else {
-                Log.d("ZongOkaraWebView", "No saved cookie, loading login page")
-                webView.loadUrl(loginUrl)
+        
+        // Purge any stale cookies from other zones/sessions
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        
+        if (savedCookie.isNotBlank()) {
+            Log.d("ZongOkaraWebView", "Restoring Okara session cookie")
+            savedCookie.split(";").forEach { part ->
+                if (part.isNotBlank()) CookieManager.getInstance().setCookie(domain, part.trim())
             }
+            CookieManager.getInstance().flush()
+            webView.loadUrl(homeUrl)
+        } else {
+            Log.d("ZongOkaraWebView", "No saved cookie, loading login page")
+            webView.loadUrl(loginUrl)
         }
     }
 
@@ -369,7 +426,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         val searchJs = JSONObjectEscape.forJavaScript(cleanName)
         webView.evaluateJavascript(
             "(function(){" +
-                    "var inp = document.querySelector('input[type=search][aria-controls=\"table3\"]');" +
+                    "var inp = document.querySelector('input[type=search][aria-controls=\"table3\"], input[aria-controls=\"table3\"]');" +
                     "if(!inp) return 'not_found';" +
                     "inp.value = '$searchJs'; inp.dispatchEvent(new Event('input',{bubbles:true}));" +
                     "return 'done';" +
@@ -386,10 +443,30 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     }
 
     private fun openZongAddCreditAndSubmit(amount: String) {
-        webView.evaluateJavascript("(function(){ var btns=document.querySelectorAll('button[data-target=\"#credit\"]'); if(btns.length>0){ btns[0].click(); return 'clicked'; } return 'not_found'; })()") {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "var btns=document.querySelectorAll('button[data-target=\"#credit\"]');" +
+                    "for(var i=0; i<btns.length; i++) {" +
+                    "  if(btns[i].innerText.indexOf('Add Credit') > -1) { btns[i].click(); return 'clicked'; }" +
+                    "}" +
+                    "if(btns.length > 0) { btns[0].click(); return 'clicked_first'; }" +
+                    "return 'not_found';" +
+                    "})()"
+        ) { res ->
+            Log.d("ZongOkaraWebView", "Add Credit button status: $res")
+            if (res.contains("not_found")) {
+                // Retry once
+                webView.postDelayed({ openZongAddCreditAndSubmit(amount) }, 1000)
+                return@evaluateJavascript
+            }
+            
             webView.postDelayed({
-                webView.evaluateJavascript("(function(){ var inp=document.querySelector('input[name=\"credit_amount\"]'); if(inp && !window.__zongSubmitted){ window.__zongSubmitted=true; inp.value='$amount'; document.querySelector('button[name=\"doNewCredit\"]').click(); return 'submitted'; } return 'already_submitted'; })()") { _ ->
-                    webView.postDelayed({ captureDealerTopupResult() }, 2000)
+                webView.evaluateJavascript("(function(){ var inp=document.querySelector('input[name=\"credit_amount\"]'); if(inp && !window.__zongSubmitted){ window.__zongSubmitted=true; inp.value='$amount'; document.querySelector('button[name=\"doNewCredit\"]').click(); return 'submitted'; } return 'already_submitted'; })()") { submitRes ->
+                    Log.d("ZongOkaraWebView", "Topup submit status: $submitRes")
+                    if (submitRes.contains("submitted")) {
+                        dealerTopupStep = 3
+                        webView.postDelayed({ captureDealerTopupResult() }, 3000)
+                    }
                 }
             }, 1000)
         }

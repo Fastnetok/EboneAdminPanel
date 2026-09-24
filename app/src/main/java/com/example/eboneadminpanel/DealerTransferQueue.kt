@@ -57,7 +57,8 @@ object DealerTransferQueue {
     // fill + submit + balance-check reasonably takes under a minute;
     // 6 minutes leaves large headroom for a slow network) so a merely
     // slow-but-working transfer is never mistaken for a stuck one.
-    private const val STUCK_TIMEOUT_MS = 6 * 60 * 1000L
+    // Reduced timeout to 45 seconds to match user expectation of "Immediate"
+    private const val STUCK_TIMEOUT_MS = 45 * 1000L
 
     data class PendingTransfer(
         val transactionId: String,
@@ -82,6 +83,14 @@ object DealerTransferQueue {
             Log.d(TAG, "Ignoring duplicate enqueue for ${transfer.transactionId} (already queued/running)")
             return
         }
+        
+        // REFRESH: If we get a new request, and the queue is empty, 
+        // force clear the busy flag to ensure immediate execution.
+        if (busy && queue.isEmpty()) {
+            Log.w(TAG, "Force releasing busy flag for new incoming transfer.")
+            busy = false
+        }
+
         queuedIds.add(transfer.transactionId)
         queue.add(transfer)
         Log.d(

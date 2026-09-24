@@ -132,17 +132,35 @@ object PaymentClaimManager {
             ClaimResult.Claimed(claimId)
         }.addOnSuccessListener { result ->
             if (result is ClaimResult.Duplicate) {
-                logDuplicateAttempt(
-                    request = request,
-                    normalizedSource = source,
-                    normalizedIdentifierType = identifierType,
-                    normalizedIdentifier = identifier,
-                    result = result,
-                    smsBody = smsBody
-                )
+                val origTxId = result.originalTransactionId
+                if (origTxId.isNotBlank() && origTxId != request.transactionId) {
+                    val targetCollection = if (result.originalOwnerType == OWNER_DEALER) "dealerTransactions" else "transactions"
+                    db.collection(targetCollection).document(origTxId).get()
+                        .addOnSuccessListener { origSnap ->
+                            if (!origSnap.exists()) {
+                                Log.w(TAG, "Orphaned claim detected for deleted transaction $origTxId — clearing orphaned claim and retrying.")
+                                claimRef.delete().addOnSuccessListener {
+                                    claim(request, smsBody, onResult)
+                                }.addOnFailureListener {
+                                    logDuplicateAttempt(request, source, identifierType, identifier, result, smsBody)
+                                    onResult(result)
+                                }
+                            } else {
+                                logDuplicateAttempt(request, source, identifierType, identifier, result, smsBody)
+                                onResult(result)
+                            }
+                        }
+                        .addOnFailureListener {
+                            logDuplicateAttempt(request, source, identifierType, identifier, result, smsBody)
+                            onResult(result)
+                        }
+                } else {
+                    logDuplicateAttempt(request, source, identifierType, identifier, result, smsBody)
+                    onResult(result)
+                }
+            } else {
+                onResult(result)
             }
-
-            onResult(result)
         }.addOnFailureListener { error ->
             Log.e(
                 TAG,

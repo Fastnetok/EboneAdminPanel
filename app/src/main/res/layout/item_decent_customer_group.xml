@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:layout_marginStart="8dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginTop="6dp">
+
+    <!-- Customer Header Card -->
+    <LinearLayout
+        android:id="@+id/customerHeaderLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@drawable/bg_decent_card"
+        android:gravity="center_vertical"
+        android:padding="12dp"
+        android:elevation="1dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground">
+
+        <TextView
+            android:id="@+id/tvCustomerRankBadge"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="@drawable/bg_rank_circle"
+            android:gravity="center"
+            android:text="1"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvCustomerName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Customer Name"
+                android:textColor="#212121"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCustomerSubStats"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Address / Location"
+                android:textColor="#546E7A"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <!-- Repeat Count Badge -->
+        <TextView
+            android:id="@+id/tvCustomerCountBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#FFF3E0"
+            android:paddingStart="8dp"
+            android:paddingTop="3.5dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="3.5dp"
+            android:text="Repeat ④"
+            android:textColor="#E65100"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <!-- NC Count Badge -->
+        <TextView
+            android:id="@+id/tvCustomerNcBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:background="#FFEBEE"
+            android:paddingStart="8dp"
+            android:paddingTop="3.5dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="3.5dp"
+            android:text="NC ②"
+            android:textColor="#C62828"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvCustomerExpandIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="▼"
+            android:textColor="#546E7A"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+    <!-- Container for Complaint Cards inside this Customer -->
+    <LinearLayout
+        android:id="@+id/llCustomerComplaintList"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
+        android:visibility="gone" />
+
+</LinearLayout>

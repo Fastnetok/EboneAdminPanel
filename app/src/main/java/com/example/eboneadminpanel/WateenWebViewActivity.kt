@@ -77,6 +77,7 @@ class WateenWebViewActivity : AppCompatActivity() {
     private var dealerSearchName: String? = null
     private var forceAccountName: String? = null
     private var complaintIdToResolve: String? = null
+    private var actionStartedAfterLogin = false // NEW: Track if we've already triggered the action
 
     companion object {
         private const val WATEEN_PREFS = "wateen_accounts"
@@ -182,6 +183,7 @@ class WateenWebViewActivity : AppCompatActivity() {
                 Log.d(TAG, "Auth page loaded. loginDone=false")
                 loginDone = false
                 loginAttemptInProgress = false
+                actionStartedAfterLogin = false
                 tryAutoLogin()
             }
             url.contains("panel.wateen.com") && url.contains("/user/user/view/") && autoActivateCustomerId != null -> {
@@ -197,6 +199,12 @@ class WateenWebViewActivity : AppCompatActivity() {
                 cacheIspSessionCookieIfApplicable("WATEEN", "https://panel.wateen.com")
                 
                 if (manualAction == "DEALER_TOPUP" && !dealerEboneId.isNullOrBlank()) {
+                    if (!wateenDealerListLoadAttempted) {
+                        wateenDealerListLoadAttempted = true
+                        Log.d(TAG, "Loading all dealers list")
+                        webView.postDelayed({ webView.loadUrl("https://panel.wateen.com/dealer/dealer/all") }, 800)
+                    }
+                } else if (manualAction == "FETCH_DEALER_ID" && !dealerSearchName.isNullOrBlank()) {
                     if (!wateenDealerListLoadAttempted) {
                         wateenDealerListLoadAttempted = true
                         Log.d(TAG, "Loading all dealers list")
@@ -255,12 +263,18 @@ class WateenWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
+        // Purge any stale cookies from other ISP / Zone sessions
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+
         val ispUsername = IspPanelSettingsActivity.getSavedUsername(this, "WATEEN", targetZone)
         if (!ispUsername.isNullOrEmpty()) {
             val savedCookie = securePrefs(ISP_SESSION_PREFS).getString("WATEEN_$targetZone", "") ?: ""
             if (savedCookie.isNotEmpty()) {
-                Log.d(TAG, "Loading with saved ISP session cookie")
-                savedCookie.split(";").forEach { CookieManager.getInstance().setCookie("https://panel.wateen.com", it.trim()) }
+                Log.d(TAG, "Loading with saved ISP session cookie for Wateen / $targetZone")
+                savedCookie.split(";").forEach {
+                    if (it.isNotBlank()) CookieManager.getInstance().setCookie("https://panel.wateen.com", it.trim())
+                }
                 CookieManager.getInstance().flush()
                 webView.loadUrl("https://panel.wateen.com/user/user/all")
             } else {
