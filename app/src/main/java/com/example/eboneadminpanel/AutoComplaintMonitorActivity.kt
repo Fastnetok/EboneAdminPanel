@@ -163,7 +163,7 @@ class AutoComplaintMonitorActivity : AppCompatActivity() {
         val nowTotal = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
 
         val isWithinWindow = nowTotal in allowStartTotal..allowEndTotal
-        
+
         val onlineList = mutableListOf<Pair<EmployeeItem, Int>>()
 
         for (emp in eSnap.children) {
@@ -185,7 +185,7 @@ class AutoComplaintMonitorActivity : AppCompatActivity() {
                         }
                     }
                 }
-                
+
                 val isMonitored = mMapSnap?.child(deviceId)?.getValue(Boolean::class.java) ?: false
                 onlineList.add(EmployeeItem(deviceId, name, "ONLINE", isMonitored) to totalComplaints)
             }
@@ -200,7 +200,7 @@ class AutoComplaintMonitorActivity : AppCompatActivity() {
                 .thenByDescending { it.first.isMonitored }             // Monitored status
                 .thenBy { it.first.name }                              // Alphabetical name
         ).map { it.first }
-        
+
         adapter.updateList(sortedList)
         
         if (initialSettingsLoaded) {

@@ -25,6 +25,9 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.firebase.database.*
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity(),
     OnMapReadyCallback {
@@ -272,155 +275,163 @@ class MainActivity : AppCompatActivity(),
 
         loadDashboardGeofences()
 
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
         FirebaseDatabase
             .getInstance()
-            .getReference("employees")
-            .addValueEventListener(
-                object : ValueEventListener {
+            .getReference("attendance")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(attSnapshot: DataSnapshot) {
+                    FirebaseDatabase
+                        .getInstance()
+                        .getReference("employees")
+                        .addValueEventListener(
+                            object : ValueEventListener {
 
-                    override fun onDataChange(
-                        snapshot: DataSnapshot
-                    ) {
-
-                        val onlineList =
-                            mutableListOf<String>()
-
-                        val offlineList =
-                            mutableListOf<String>()
-
-                        var firstLocation:
-                                LatLng? = null
-
-                        val seenEmployeeNames = HashSet<String>()
-
-                        for (employee in snapshot.children) {
-
-                            val latitude =
-                                employee.child("latitude")
-                                    .value?.toString()
-                                    ?.toDoubleOrNull()
-
-                            val longitude =
-                                employee.child("longitude")
-                                    .value?.toString()
-                                    ?.toDoubleOrNull()
-
-                            val employeeName =
-                                employee.child("employeeName")
-                                    .value?.toString()
-                                    ?: "Employee"
-
-                            val status =
-                                employee.child("status")
-                                    .value?.toString()
-                                    ?: "OFFLINE"
-
-                            if (
-                                status.uppercase() ==
-                                "ONLINE"
-                            ) {
-
-                                onlineList.add(
-                                    employeeName
-                                )
-
-                            } else {
-
-                                offlineList.add(
-                                    employeeName
-                                )
-                            }
-
-                            if (
-                                latitude != null &&
-                                longitude != null
-                            ) {
-
-                                val location =
-                                    LatLng(
-                                        latitude,
-                                        longitude
-                                    )
-
-                                seenEmployeeNames.add(employeeName)
-
-                                val existingMarker = employeeMarkers[employeeName]
-                                if (existingMarker != null) {
-                                    existingMarker.position = location
-                                    if (employeeName == followedEmployeeName) {
-                                        existingMarker.showInfoWindow()
-                                    }
-                                } else {
-                                    val newMarker = mMap.addMarker(
-                                        MarkerOptions()
-                                            .position(location)
-                                            .title(employeeName)
-                                    )
-                                    if (newMarker != null) {
-                                        employeeMarkers[employeeName] = newMarker
-                                    }
-                                }
-
-                                if (employeeName == followedEmployeeName) {
-                                    mMap.animateCamera(
-                                        CameraUpdateFactory.newLatLng(location)
-                                    )
-                                }
-
-                                checkGeofenceTransitions(employeeName, latitude, longitude)
-
-                                if (
-                                    firstLocation ==
-                                    null
+                                override fun onDataChange(
+                                    snapshot: DataSnapshot
                                 ) {
 
-                                    firstLocation =
-                                        location
+                                    val onlineList =
+                                        mutableListOf<String>()
+
+                                    val offlineList =
+                                        mutableListOf<String>()
+
+                                    var firstLocation:
+                                            LatLng? = null
+
+                                    val seenEmployeeNames = HashSet<String>()
+
+                                    for (employee in snapshot.children) {
+
+                                        val deviceId = employee.key ?: ""
+
+                                        val latitude =
+                                            employee.child("latitude")
+                                                .value?.toString()
+                                                ?.toDoubleOrNull()
+
+                                        val longitude =
+                                            employee.child("longitude")
+                                                .value?.toString()
+                                                ?.toDoubleOrNull()
+
+                                        val employeeName =
+                                            employee.child("employeeName")
+                                                .value?.toString()
+                                                ?: "Employee"
+
+                                        val hasAttendance = attSnapshot.child(deviceId).hasChild(todayKey) ||
+                                                           (employeeName != "Employee" && attSnapshot.child(employeeName).hasChild(todayKey))
+
+                                        if (hasAttendance) {
+
+                                            onlineList.add(
+                                                employeeName
+                                            )
+
+                                        } else {
+
+                                            offlineList.add(
+                                                employeeName
+                                            )
+                                        }
+
+                                        if (
+                                            latitude != null &&
+                                            longitude != null
+                                        ) {
+
+                                            val location =
+                                                LatLng(
+                                                    latitude,
+                                                    longitude
+                                                )
+
+                                            seenEmployeeNames.add(employeeName)
+
+                                            val existingMarker = employeeMarkers[employeeName]
+                                            if (existingMarker != null) {
+                                                existingMarker.position = location
+                                                if (employeeName == followedEmployeeName) {
+                                                    existingMarker.showInfoWindow()
+                                                }
+                                            } else {
+                                                val newMarker = mMap.addMarker(
+                                                    MarkerOptions()
+                                                        .position(location)
+                                                        .title(employeeName)
+                                                )
+                                                if (newMarker != null) {
+                                                    employeeMarkers[employeeName] = newMarker
+                                                }
+                                            }
+
+                                            if (employeeName == followedEmployeeName) {
+                                                mMap.animateCamera(
+                                                    CameraUpdateFactory.newLatLng(location)
+                                                )
+                                            }
+
+                                            checkGeofenceTransitions(employeeName, latitude, longitude)
+
+                                            if (
+                                                firstLocation ==
+                                                null
+                                            ) {
+
+                                                firstLocation =
+                                                    location
+                                            }
+                                        }
+                                    }
+
+                                    val markersToRemove = employeeMarkers.keys.filter { it !in seenEmployeeNames }
+                                    for (name in markersToRemove) {
+                                        employeeMarkers[name]?.remove()
+                                        employeeMarkers.remove(name)
+                                        if (name == followedEmployeeName) {
+                                            followedEmployeeName = null
+                                        }
+                                    }
+
+                                    onlineEmployeesText.text =
+                                        "🟢 Online Employees (${onlineList.size})"
+
+                                    onlineEmployeesNames.text =
+                                        onlineList.joinToString(", ")
+
+                                    offlineEmployeesText.text =
+                                        "🔴 Offline Employees (${offlineList.size})"
+
+                                    offlineEmployeesNames.text =
+                                        offlineList.joinToString(", ")
+
+                                    if (!hasCenteredCameraOnce) {
+                                        firstLocation?.let {
+                                            mMap.moveCamera(
+                                                CameraUpdateFactory
+                                                    .newLatLngZoom(
+                                                        it,
+                                                        15f
+                                                    )
+                                            )
+                                            hasCenteredCameraOnce = true
+                                        }
+                                    }
+                                }
+
+                                override fun onCancelled(
+                                    error: DatabaseError
+                                ) {
                                 }
                             }
-                        }
-
-                        val markersToRemove = employeeMarkers.keys.filter { it !in seenEmployeeNames }
-                        for (name in markersToRemove) {
-                            employeeMarkers[name]?.remove()
-                            employeeMarkers.remove(name)
-                            if (name == followedEmployeeName) {
-                                followedEmployeeName = null
-                            }
-                        }
-
-                        onlineEmployeesText.text =
-                            "🟢 Online Employees (${onlineList.size})"
-
-                        onlineEmployeesNames.text =
-                            onlineList.joinToString(", ")
-
-                        offlineEmployeesText.text =
-                            "🔴 Offline Employees (${offlineList.size})"
-
-                        offlineEmployeesNames.text =
-                            offlineList.joinToString(", ")
-
-                        if (!hasCenteredCameraOnce) {
-                            firstLocation?.let {
-                                mMap.moveCamera(
-                                    CameraUpdateFactory
-                                        .newLatLngZoom(
-                                            it,
-                                            15f
-                                        )
-                                )
-                                hasCenteredCameraOnce = true
-                            }
-                        }
-                    }
-
-                    override fun onCancelled(
-                        error: DatabaseError
-                    ) {
-                    }
+                        )
                 }
-            )
+
+                override fun onCancelled(error: DatabaseError) {}
+            })
     }
 
     // ===================== GEOFENCE (SIMPLE CUSTOM INPUT + CONFIRM) =====================

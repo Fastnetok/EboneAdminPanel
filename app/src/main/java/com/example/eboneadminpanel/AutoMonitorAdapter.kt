@@ -1,8 +1,11 @@
 package com.example.eboneadminpanel
 
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AlphaAnimation
+import android.view.animation.Animation
 import android.widget.Switch
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
@@ -89,10 +92,10 @@ class AutoMonitorAdapter(
     }
 
     private fun startBlinkingAnimation(view: View) {
-        val anim = android.view.animation.AlphaAnimation(1.0f, 0.2f)
+        val anim = AlphaAnimation(1.0f, 0.2f)
         anim.duration = 500
-        anim.repeatMode = android.view.animation.Animation.REVERSE
-        anim.repeatCount = android.view.animation.Animation.INFINITE
+        anim.repeatMode = Animation.REVERSE
+        anim.repeatCount = Animation.INFINITE
         view.startAnimation(anim)
     }
 
