@@ -2,13 +2,13 @@ package com.example.eboneadminpanel
 
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -135,7 +135,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     private fun handlePage(url: String) {
         when {
             url.contains("login.php") -> {
-                Log.d("ZongOkaraWebView", "Login page detected.")
+                Log.d("ZongOkaraWebView", "Zong Okara → Login Page Detected")
                 loginDone = false
                 isCustomerSearchStarted = false 
                 customerListPrepared = false
@@ -145,18 +145,16 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
 
             url.contains("customer_portal.php") -> {
                 if (manualAction == "DEALER_TOPUP") {
-                    // Only redirect if we haven't reached the submit step
                     if (dealerTopupStep < 2) {
-                        Log.d("ZongOkaraWebView", "Landed on profile during Topup. Redirecting to Dealer List.")
+                        Log.d("ZongOkaraWebView", "Zong Okara → Landed on profile during Topup. Redirecting to Dealer List.")
                         webView.loadUrl(dealerListUrl)
                     }
                 } else {
-                    // Normal Complaints flow
                     if (isCustomerSearchStarted) {
-                        Log.d("ZongOkaraWebView", "Customer profile reached. Fetching details...")
+                        Log.d("ZongOkaraWebView", "Zong Okara → Customer profile reached. Fetching details...")
                         webView.postDelayed({ fetchZongCustomerDetails() }, 1500)
                     } else {
-                        Log.d("ZongOkaraWebView", "Landed on franchise profile. Jumping to customers.php")
+                        Log.d("ZongOkaraWebView", "Zong Okara → Landed on franchise profile. Jumping to customers.php")
                         webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
                     }
                 }
@@ -173,7 +171,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             url.contains("sub_dealers.php") && manualAction == "DEALER_TOPUP" -> {
                 if (dealerTopupStep < 1) {
                     dealerTopupStep = 1
-                    Log.d("ZongOkaraWebView", "On Sub-Dealers page. Searching for dealer.")
+                    Log.d("ZongOkaraWebView", "Zong Okara → On Sub-Dealers page. Searching for dealer.")
                     webView.postDelayed({ searchAndClickZongDealer(dealerSearchName ?: dealerDisplayName ?: "") }, 800)
                 }
             }
@@ -181,7 +179,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
             url.contains("subdealer_portal.php") && manualAction == "DEALER_TOPUP" -> {
                 if (dealerTopupStep < 2) {
                     dealerTopupStep = 2
-                    Log.d("ZongOkaraWebView", "On Dealer Portal. Opening Add Credit modal.")
+                    Log.d("ZongOkaraWebView", "Zong Okara → On Dealer Portal. Opening Add Credit modal.")
                     webView.postDelayed({ openZongAddCreditAndSubmit(topupAmount ?: "") }, 1000)
                 }
             }
@@ -190,22 +188,25 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                 // ACCOUNT ISOLATION GUARD: Ensure we didn't land on Renala's session
                 val expectedUsername = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
                 val renalaUsername = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Renala")
-                if (!expectedUsername.isNullOrBlank() && !renalaUsername.isNullOrBlank() && !renalaUsername.equals(expectedUsername, ignoreCase = true)) {
-                    webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText.substring(0, 1000) : ''; })()") { bodyText ->
-                        val text = bodyText ?: ""
-                        if (text.contains(renalaUsername, ignoreCase = true)) {
-                            Log.w("ZongOkaraWebView", "Detected Renala session ($renalaUsername) in Okara WebView! Purging cookies and forcing re-login.")
-                            CookieManager.getInstance().removeAllCookies(null)
-                            CookieManager.getInstance().flush()
-                            loginDone = false
-                            dealerTopupStep = 0
-                            balanceCheckAttempted = false
-                            webView.loadUrl(loginUrl)
-                            return@evaluateJavascript
-                        }
-                        proceedWithOkaraPage(url)
+                
+                webView.evaluateJavascript("(function(){ return document.body ? document.body.innerText.substring(0, 1500) : ''; })()") { bodyText ->
+                    val text = bodyText ?: ""
+                    if (!renalaUsername.isNullOrBlank() && text.contains(renalaUsername, ignoreCase = true) && !renalaUsername.equals(expectedUsername, ignoreCase = true)) {
+                        Log.w("ZongOkaraWebView", "Zong Okara → ACCOUNT ISOLATION VIOLATION: Detected Renala session ($renalaUsername) in Okara WebView! Purging cookies and forcing re-login.")
+                        val cm = CookieManager.getInstance()
+                        cm.removeSessionCookies(null)
+                        cm.removeAllCookies(null)
+                        cm.flush()
+                        webView.clearCache(true)
+                        webView.clearHistory()
+                        loginDone = false
+                        dealerTopupStep = 0
+                        balanceCheckAttempted = false
+                        webView.loadUrl(loginUrl)
+                        return@evaluateJavascript
                     }
-                } else {
+
+                    Log.d("ZongOkaraWebView", "Zong Okara → Login Success → Proceeding with page")
                     proceedWithOkaraPage(url)
                 }
             }
@@ -221,7 +222,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
 
         if (manualAction == "DEALER_TOPUP") {
             if (dealerTopupStep == 0 && !url.contains("sub_dealers.php") && !url.contains("subdealer_portal.php")) {
-                Log.d("ZongOkaraWebView", "Starting Topup flow from Dashboard.")
+                Log.d("ZongOkaraWebView", "Zong Okara → Starting Topup flow from Dashboard.")
                 webView.loadUrl(dealerListUrl)
             }
         } else if (manualAction == "CHECK_BALANCE") {
@@ -229,14 +230,17 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                 balanceCheckAttempted = true
                 webView.postDelayed({ readZongOkaraBalance() }, 700)
             }
-        } else if (manualAction == null && !url.contains("customers.php") && !url.contains("customer_portal.php")) {
-            Log.d("ZongOkaraWebView", "Redirecting to customers.php for Complaints")
-            webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
+        } else if (manualAction == null) {
+            // Normal flow: if not already on customers.php, redirect to customers.php for complaints
+            if (!url.contains("customers.php") && !url.contains("customer_portal.php")) {
+                Log.d("ZongOkaraWebView", "Zong Okara → Redirecting to customers.php for Complaints")
+                webView.loadUrl("https://turbonet.zong.com.pk/customers.php")
+            }
         }
     }
 
     private fun prepareCustomerList() {
-        Log.d("ZongOkaraWebView", "Preparing customer list with 1000 rows")
+        Log.d("ZongOkaraWebView", "Zong Okara → Preparing customer list with 1000 rows")
         webView.evaluateJavascript(
             "(function(){" +
                     "var sel=document.querySelector('select[name=\"managercustomers_length\"]');" +
@@ -246,7 +250,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                     "return 'prepared';" +
                     "})()"
         ) { result ->
-            Log.d("ZongOkaraWebView", "Customer list preparation: $result")
+            Log.d("ZongOkaraWebView", "Zong Okara → Customer list preparation: $result")
             if (result.contains("length_selector_not_found")) {
                 customerListPrepared = false
                 webView.postDelayed({
@@ -279,8 +283,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         """.trimIndent()
         
         webView.evaluateJavascript(script) { res ->
-            Log.d("ZongOkaraWebView", "Search result: $res")
-            // Longer delay to allow table to filter correctly
+            Log.d("ZongOkaraWebView", "Zong Okara → Search result: $res")
             webView.postDelayed({
                 webView.evaluateJavascript(
                     "(function(){" +
@@ -290,11 +293,11 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                             "    var t = (links[i].innerText || links[i].textContent || '').trim();" +
                             "    if(t === '$customerId'){ links[i].click(); found = true; break; }" +
                             "  }" +
-                            "  if(!found && links.length > 0) { links[0].click(); found = true; }" + // Fallback to first result if ID matches partially
+                            "  if(!found && links.length > 0) { links[0].click(); found = true; }" +
                             "  return found ? 'clicked' : 'not_found_on_page';" +
                             "})()"
                 ) { result ->
-                    Log.d("ZongOkaraWebView", "Profile link click status: $result")
+                    Log.d("ZongOkaraWebView", "Zong Okara → Profile link click status: $result")
                 }
             }, 2000)
         }
@@ -366,31 +369,39 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
     }
 
     private fun loadInitialPage() {
-        // STRICTLY use Okara (Abbas046) credentials
         val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
         val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", "Okara")
         
+        Log.d("ZongOkaraWebView", "Zong Okara → Login Started → Okara URL ($loginUrl) → User: $username")
+
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
-            Log.e("ZongOkaraWebView", "Okara credentials missing!")
+            Log.e("ZongOkaraWebView", "Zong Okara → Okara credentials missing!")
             webView.loadUrl(loginUrl)
             return
         }
 
+        // STRICT ISOLATION: Purge global cookies and WebView storage for domain
+        val cm = CookieManager.getInstance()
+        cm.removeSessionCookies(null)
+        cm.removeAllCookies(null)
+        cm.flush()
+
+        webView.clearCache(true)
+        webView.clearHistory()
+        webView.clearFormData()
+        WebStorage.getInstance().deleteAllData()
+
         val savedCookie = getSessionCookie()
         
-        // Purge any stale cookies from other zones/sessions
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        
         if (savedCookie.isNotBlank()) {
-            Log.d("ZongOkaraWebView", "Restoring Okara session cookie")
+            Log.d("ZongOkaraWebView", "Zong Okara → Restoring Okara session cookie")
             savedCookie.split(";").forEach { part ->
-                if (part.isNotBlank()) CookieManager.getInstance().setCookie(domain, part.trim())
+                if (part.isNotBlank()) cm.setCookie(domain, part.trim())
             }
-            CookieManager.getInstance().flush()
+            cm.flush()
             webView.loadUrl(homeUrl)
         } else {
-            Log.d("ZongOkaraWebView", "No saved cookie, loading login page")
+            Log.d("ZongOkaraWebView", "Zong Okara → No saved cookie, loading login page")
             webView.loadUrl(loginUrl)
         }
     }
@@ -399,9 +410,10 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         if (loginAttemptInProgress) return
         loginAttemptInProgress = true
 
-        // Ensure we only use Okara account here
         val username = IspPanelSettingsActivity.getSavedUsername(this, "ZONG", "Okara")
         val password = IspPanelSettingsActivity.getSavedPassword(this, "ZONG", "Okara")
+
+        Log.d("ZongOkaraWebView", "Zong Okara → Filling Okara credentials for user: $username")
 
         webView.evaluateJavascript(
             "(function(){" +
@@ -415,6 +427,7 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
                     "})()"
         ) { raw ->
             loginAttemptInProgress = false
+            Log.d("ZongOkaraWebView", "Zong Okara → Login Submit Result: $raw")
             if (raw.contains("not_ready") && attempt < 5) {
                 webView.postDelayed({ tryAutoLogin(attempt + 1) }, 1000)
             }
@@ -455,7 +468,6 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         ) { res ->
             Log.d("ZongOkaraWebView", "Add Credit button status: $res")
             if (res.contains("not_found")) {
-                // Retry once
                 webView.postDelayed({ openZongAddCreditAndSubmit(amount) }, 1000)
                 return@evaluateJavascript
             }
@@ -472,14 +484,45 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
         }
     }
 
-    private fun readZongOkaraBalance() {
-        webView.evaluateJavascript("(function(){ var t=document.body.innerText; var m=t.match(/Available Credit Rs\\.?\\s*([0-9,.]+)/i); return m ? m[1] : null; })()") { res ->
-            val balance = res.replace("\"", "").replace(",", "").toDoubleOrNull()
+    private fun readZongOkaraBalance(attempt: Int = 1) {
+        webView.evaluateJavascript(
+            "(function(){" +
+                    "var t=document.body.innerText||'';" +
+                    "var m=t.match(/Available\\s+Credit\\s+Rs\\.?\\s*(-?[0-9,]+(?:\\.[0-9]+)?)/i);" +
+                    "if(m)return JSON.stringify({found:true,value:m[1]});" +
+                    "var m2=t.match(/Account\\s+Credit[^0-9\\-]*(-?[0-9,]+(?:\\.[0-9]+)?)/i);" +
+                    "if(m2)return JSON.stringify({found:true,value:m2[1]});" +
+                    "var m3=t.match(/Credit[^0-9\\-]*(-?[0-9,]+(?:\\.[0-9]+)?)/i);" +
+                    "if(m3)return JSON.stringify({found:true,value:m3[1]});" +
+                    "return JSON.stringify({found:false});" +
+                    "})()"
+        ) { raw ->
+            val clean = raw.removeSurrounding("\"").replace("\\\"", "\"")
+            val balance = Regex("\"value\":\"(.*?)\"")
+                .find(clean)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.replace(",", "")
+                ?.toDoubleOrNull()
+
+            Log.d("ZongOkaraWebView", "Zong Okara → Balance Read attempt $attempt: $balance (raw: $raw)")
+
             if (balance != null) {
                 FranchiseBalanceManager.updateBalance("ZONG", balance, "Okara") {
                     FranchiseBalanceManager.showUpdateNotification(this, "ZONG", balance, "Okara")
-                    setResult(RESULT_OK); finish()
+                    setResult(RESULT_OK, Intent().apply {
+                        putExtra("checked_balance", balance)
+                        putExtra("selected_isp", "ZONG")
+                        putExtra("target_zone", "Okara")
+                    })
+                    finish()
                 }
+            } else if (attempt < 10) {
+                webView.postDelayed({ readZongOkaraBalance(attempt + 1) }, 1000)
+            } else {
+                Toast.makeText(this, "Zong Okara balance could not be read.", Toast.LENGTH_SHORT).show()
+                setResult(RESULT_CANCELED)
+                finish()
             }
         }
     }
@@ -522,8 +565,8 @@ class ZongOkaraWebViewActivity : AppCompatActivity() {
 
     private fun saveSessionCookie(cookie: String) {
         val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        val prefs = EncryptedSharedPreferences.create(this, sessionPrefsName, masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
-        prefs.edit().putString("ZONG_Okara", cookie).apply()
+        val prefsOkara = EncryptedSharedPreferences.create(this, sessionPrefsName, masterKey, EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        prefsOkara.edit().putString("ZONG_Okara", cookie).apply()
     }
 
     private object JSONObjectEscape {

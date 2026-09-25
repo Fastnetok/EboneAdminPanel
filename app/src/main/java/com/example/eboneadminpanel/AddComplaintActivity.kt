@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.firebase.database.FirebaseDatabase
 import java.text.SimpleDateFormat
@@ -41,7 +43,7 @@ class AddComplaintActivity : AppCompatActivity() {
                 "Zong (turbonet.zong.com.pk)"
             )
 
-            androidx.appcompat.app.AlertDialog.Builder(this)
+            AlertDialog.Builder(this)
                 .setTitle("Select ISP")
                 .setItems(ispList) { _, which ->
                     val selectedISP = when (which) {
@@ -113,7 +115,9 @@ class AddComplaintActivity : AppCompatActivity() {
                             }
                         }
 
-                        // Step 4: Filter only present employees and prepare display list
+                        val totalCount = allEmployees.size
+
+                        // Step 4: Prepare display list with Online (Present) on top, Offline (Absent) below, sorted by active workload descending
                         val filteredList = mutableListOf<String>()
                         val finalEmployeeNames = mutableListOf<String>()
 
@@ -121,22 +125,40 @@ class AddComplaintActivity : AppCompatActivity() {
                         filteredList.add("⭐ NEW CONNECTION (Intake)")
                         finalEmployeeNames.add("NEW_CONNECTION_INTAKE")
 
+                        val presentEmployees = mutableListOf<Pair<String, String>>()
+                        val absentEmployees = mutableListOf<Pair<String, String>>()
+
                         for ((name, deviceId) in allEmployees) {
                             if (presentDeviceIds.contains(deviceId)) {
-                                val count = complaintCounts[name] ?: 0
-                                finalEmployeeNames.add(name)
-                                filteredList.add("$name ($count)")
+                                presentEmployees.add(name to deviceId)
+                            } else {
+                                absentEmployees.add(name to deviceId)
                             }
                         }
 
-                        if (finalEmployeeNames.isEmpty()) {
-                            Toast.makeText(this, "Aaj koi employee present nahi hai", Toast.LENGTH_LONG).show()
+                        presentEmployees.sortByDescending { complaintCounts[it.first] ?: 0 }
+                        absentEmployees.sortByDescending { complaintCounts[it.first] ?: 0 }
+
+                        for ((name, _) in presentEmployees) {
+                            val count = complaintCounts[name] ?: 0
+                            finalEmployeeNames.add(name)
+                            filteredList.add("🟢 $name (Online | Active: $count)")
+                        }
+
+                        for ((name, _) in absentEmployees) {
+                            val count = complaintCounts[name] ?: 0
+                            finalEmployeeNames.add(name)
+                            filteredList.add("🔴 $name (Offline | Active: $count)")
+                        }
+
+                        if (finalEmployeeNames.size <= 1) {
+                            Toast.makeText(this, "Koi employee registered nahi hai", Toast.LENGTH_LONG).show()
                             return@addOnSuccessListener
                         }
 
-                        // Step 5: Show the filtered list in a dialog
-                        androidx.appcompat.app.AlertDialog.Builder(this)
-                            .setTitle("Select Present Employee (Complaints)")
+                        // Step 5: Show the list in a dialog with total count
+                        AlertDialog.Builder(this)
+                            .setTitle("Select Employee (Total: $totalCount)")
                             .setItems(filteredList.toTypedArray()) { _, which ->
                                 val selectedEmployee = finalEmployeeNames[which]
                                 val currentTime = System.currentTimeMillis()
@@ -212,7 +234,7 @@ class AddComplaintActivity : AppCompatActivity() {
 
     private val webViewLauncher =
         registerForActivityResult(
-            androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+            ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == RESULT_OK) {
                 val data = result.data

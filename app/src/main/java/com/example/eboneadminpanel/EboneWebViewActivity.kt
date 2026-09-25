@@ -159,19 +159,8 @@ class EboneWebViewActivity : AppCompatActivity() {
 
                 handlePageLoaded(url)
 
-                if (!loginDone && !loginAttemptInProgress) {
-                    webView.postDelayed({
-                        webView.evaluateJavascript(
-                            "(function(){" +
-                                    "  var p = document.querySelector('input[type=password]');" +
-                                    "  return p ? 'has_password_field' : 'no';" +
-                                    "})()"
-                        ) { hasPasswordField ->
-                            if (hasPasswordField.trim().removeSurrounding("\"") == "has_password_field" && !loginDone && !loginAttemptInProgress) {
-                                tryAutoLogin()
-                            }
-                        }
-                    }, 100)
+                if (!loginDone && !loginAttemptInProgress && (url.contains("logincheck", ignoreCase = true) || url.contains("login", ignoreCase = true))) {
+                    tryAutoLogin()
                 }
             }
 
@@ -189,9 +178,11 @@ class EboneWebViewActivity : AppCompatActivity() {
 
     private fun handlePageLoaded(url: String) {
         when {
-            url.contains("logincheck") || url.contains("login") -> {
-                loginDone = false; loginAttemptInProgress = false
-                tryAutoLogin()
+            url.contains("logincheck", ignoreCase = true) || url.contains("login", ignoreCase = true) -> {
+                loginDone = false
+                if (!loginAttemptInProgress) {
+                    tryAutoLogin()
+                }
             }
             url.contains("/clients/clientChange/") && manualAction != null -> {
                 prepareEbonePasswordAction()

@@ -67,7 +67,7 @@
                 app:tint="#455A64" />
         </LinearLayout>
 
-        <!-- Professional Segmented Control (CUSTOMER VIEW | DATE VIEW) -->
+        <!-- Professional Segmented Control (CUSTOMER VIEW | DATE VIEW) with Transparent Background -->
         <LinearLayout
             android:id="@+id/llRepeatToggleContainer"
             android:layout_width="match_parent"
@@ -83,9 +83,7 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:backgroundTint="#455A64"
                 android:text="👤 CUSTOMER VIEW"
-                android:textColor="#FFFFFF"
                 android:textSize="11.5sp"
                 android:textStyle="bold"
                 android:gravity="center"
@@ -99,10 +97,8 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:layout_marginStart="3dp"
-                android:backgroundTint="#FFFFFF"
+                android:layout_marginStart="4dp"
                 android:text="📅 DATE VIEW"
-                android:textColor="#455A64"
                 android:textSize="11.5sp"
                 android:textStyle="bold"
                 android:gravity="center"
