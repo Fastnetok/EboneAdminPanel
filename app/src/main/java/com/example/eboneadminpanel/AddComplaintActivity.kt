@@ -46,24 +46,27 @@ class AddComplaintActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("Select ISP")
                 .setItems(ispList) { _, which ->
-                    val selectedISP = when (which) {
-                        0 -> "EBONE"
-                        1 -> "WATEEN"
-                        else -> "ZONG"
+                    val (selectedISP, selectedZone) = when (which) {
+                        0 -> "EBONE" to "Okara"
+                        1 -> "WATEEN" to "Okara"
+                        else -> "ZONG" to "Okara"
                     }
 
                     selectedCompany = selectedISP
 
-                    val targetActivity = WebViewRouter.getTargetActivity(selectedISP, null)
-                    val intent = Intent(this, targetActivity)
-                    intent.putExtra("selected_isp", selectedISP)
-                    
-                    // NEW: Pass existing User ID if present so WebView can auto-search
-                    val currentId = userIdInput.text.toString().trim()
-                    if (currentId.isNotEmpty()) {
-                        intent.putExtra("auto_activate_customer_id", currentId)
+                    val targetActivity = WebViewRouter.getTargetActivity(selectedISP, selectedZone)
+                    val intent = Intent(this, targetActivity).apply {
+                        putExtra("selected_isp", selectedISP)
+                        putExtra("target_zone", selectedZone)
+                        putExtra("zone", selectedZone)
+
+                        // NEW: Pass existing User ID if present so WebView can auto-search
+                        val currentId = userIdInput.text.toString().trim()
+                        if (currentId.isNotEmpty()) {
+                            putExtra("auto_activate_customer_id", currentId)
+                        }
                     }
-                    
+
                     webViewLauncher.launch(intent)
                 }
                 .setNegativeButton("Cancel", null)

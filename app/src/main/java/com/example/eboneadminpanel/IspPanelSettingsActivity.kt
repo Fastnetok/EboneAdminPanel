@@ -1,14 +1,19 @@
 package com.example.eboneadminpanel
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.text.InputType
+import android.util.Base64
 import android.util.Log
 import android.view.View
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -54,6 +59,15 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     if (isZong && isOkara && isFranchiseAccount && !isAbbas046) return obj
                 } catch (_: Exception) { }
             }
+            // Pass 3: any non-dealer Zong account
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
+                    val isFranchiseAccount = !obj.optBoolean("isDealer", false)
+                    if (isZong && isFranchiseAccount) return obj
+                } catch (_: Exception) { }
+            }
             return null
         }
 
@@ -64,6 +78,17 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 if (zone.equals("Okara", ignoreCase = true)) {
                     preferredZongOkaraComplaintAccount(arr)?.let { return it.optString("username") }
                 } else if (zone.equals("Renala", ignoreCase = true)) {
+                    for (i in 0 until arr.length()) {
+                        try {
+                            val obj = arr.getJSONObject(i)
+                            val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
+                            val isRenala = accountZone(obj).equals("Renala", ignoreCase = true)
+                            val isFranchiseAccount = !obj.optBoolean("isDealer", false)
+                            if (isZong && isFranchiseAccount && isRenala) {
+                                return obj.getString("username")
+                            }
+                        } catch (_: Exception) { }
+                    }
                     for (i in 0 until arr.length()) {
                         try {
                             val obj = arr.getJSONObject(i)
@@ -91,27 +116,22 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 } catch (_: Exception) { }
             }
 
-            // Pass 2: Fallback for legacy (no zone field) — ONLY if requesting Okara
-            if (zone.equals("Okara", ignoreCase = true)) {
-                for (i in 0 until arr.length()) {
-                    try {
-                        val obj = arr.getJSONObject(i)
-                        if (obj.optString("isp").equals(isp, ignoreCase = true) && 
-                            !obj.optBoolean("isDealer", false) && 
-                            !obj.has("zone")) {
-                            return obj.getString("username")
-                        }
-                    } catch (_: Exception) { }
-                }
-            }
-
-            // Pass 3: Dealer account, exact isp+zone match (last resort)
+            // Pass 2: Non-dealer, exact ISP match (zone fallback)
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (obj.optString("isp").equals(isp, ignoreCase = true) && 
-                        obj.optBoolean("isDealer", false) && 
-                        accountZone(obj).equals(zone, ignoreCase = true)) {
+                        !obj.optBoolean("isDealer", false)) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { }
+            }
+
+            // Pass 3: Any account matching ISP
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optString("isp").equals(isp, ignoreCase = true)) {
                         return obj.getString("username")
                     }
                 } catch (_: Exception) { }
@@ -130,6 +150,17 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     for (i in 0 until arr.length()) {
                         try {
                             val obj = arr.getJSONObject(i)
+                            val isZong = obj.optString("isp").equals("ZONG", ignoreCase = true)
+                            val isRenala = accountZone(obj).equals("Renala", ignoreCase = true)
+                            val isFranchiseAccount = !obj.optBoolean("isDealer", false)
+                            if (isZong && isFranchiseAccount && isRenala) {
+                                return obj.getString("password")
+                            }
+                        } catch (_: Exception) { }
+                    }
+                    for (i in 0 until arr.length()) {
+                        try {
+                            val obj = arr.getJSONObject(i)
                             val uname = normalizedUsername(obj.optString("username"))
                             if (obj.optString("isp").equals("ZONG", ignoreCase = true) &&
                                 !obj.optBoolean("isDealer", false) &&
@@ -142,6 +173,7 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 }
             }
             
+            // Pass 1: Non-dealer, exact ISP + exact Zone match (case-insensitive)
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
@@ -153,25 +185,22 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                 } catch (_: Exception) { }
             }
 
-            if (zone.equals("Okara", ignoreCase = true)) {
-                for (i in 0 until arr.length()) {
-                    try {
-                        val obj = arr.getJSONObject(i)
-                        if (obj.optString("isp").equals(isp, ignoreCase = true) && 
-                            !obj.optBoolean("isDealer", false) && 
-                            !obj.has("zone")) {
-                            return obj.getString("password")
-                        }
-                    } catch (_: Exception) { }
-                }
-            }
-
+            // Pass 2: Non-dealer, exact ISP match
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (obj.optString("isp").equals(isp, ignoreCase = true) && 
-                        obj.optBoolean("isDealer", false) && 
-                        accountZone(obj).equals(zone, ignoreCase = true)) {
+                        !obj.optBoolean("isDealer", false)) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
+            }
+
+            // Pass 3: Any account matching ISP
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optString("isp").equals(isp, ignoreCase = true)) {
                         return obj.getString("password")
                     }
                 } catch (_: Exception) { }
@@ -182,13 +211,38 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
         fun getDealerUsername(context: Context, isp: String, zone: String, dealerName: String): String? {
             val arr = safeAccountsArray(context) ?: return null
+            // Pass 1: Exact match on ISP + DealerName + Zone (isDealer = true)
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (obj.optString("isp").equals(isp, ignoreCase = true) &&
                         obj.optBoolean("isDealer", false) &&
                         accountZone(obj).equals(zone, ignoreCase = true) &&
-                        obj.optString("dealerName", "").equals(dealerName, ignoreCase = true)
+                        obj.optString("dealerName", "").trim().equals(dealerName.trim(), ignoreCase = true)
+                    ) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { }
+            }
+            // Pass 2: Match ISP + DealerName (case-insensitive)
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
+                        obj.optString("dealerName", "").trim().equals(dealerName.trim(), ignoreCase = true)
+                    ) {
+                        return obj.getString("username")
+                    }
+                } catch (_: Exception) { }
+            }
+            // Pass 3: Match ISP + contains DealerName (partial match)
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    val storedDealer = obj.optString("dealerName", "").trim()
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
+                        storedDealer.isNotEmpty() &&
+                        (storedDealer.contains(dealerName, ignoreCase = true) || dealerName.contains(storedDealer, ignoreCase = true))
                     ) {
                         return obj.getString("username")
                     }
@@ -199,13 +253,38 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
         fun getDealerPassword(context: Context, isp: String, zone: String, dealerName: String): String? {
             val arr = safeAccountsArray(context) ?: return null
+            // Pass 1: Exact match on ISP + DealerName + Zone (isDealer = true)
             for (i in 0 until arr.length()) {
                 try {
                     val obj = arr.getJSONObject(i)
                     if (obj.optString("isp").equals(isp, ignoreCase = true) &&
                         obj.optBoolean("isDealer", false) &&
                         accountZone(obj).equals(zone, ignoreCase = true) &&
-                        obj.optString("dealerName", "").equals(dealerName, ignoreCase = true)
+                        obj.optString("dealerName", "").trim().equals(dealerName.trim(), ignoreCase = true)
+                    ) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
+            }
+            // Pass 2: Match ISP + DealerName (case-insensitive)
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
+                        obj.optString("dealerName", "").trim().equals(dealerName.trim(), ignoreCase = true)
+                    ) {
+                        return obj.getString("password")
+                    }
+                } catch (_: Exception) { }
+            }
+            // Pass 3: Match ISP + contains DealerName (partial match)
+            for (i in 0 until arr.length()) {
+                try {
+                    val obj = arr.getJSONObject(i)
+                    val storedDealer = obj.optString("dealerName", "").trim()
+                    if (obj.optString("isp").equals(isp, ignoreCase = true) &&
+                        storedDealer.isNotEmpty() &&
+                        (storedDealer.contains(dealerName, ignoreCase = true) || dealerName.contains(storedDealer, ignoreCase = true))
                     ) {
                         return obj.getString("password")
                     }
@@ -217,7 +296,24 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         private fun safeAccountsArray(context: Context): JSONArray? {
             return try {
                 val json = getPrefs(context).getString(KEY_ACCOUNTS, null) ?: return null
-                JSONArray(json)
+                val trimmed = json.trim()
+                if (trimmed.startsWith("[")) {
+                    JSONArray(trimmed)
+                } else if (trimmed.startsWith("{")) {
+                    val obj = JSONObject(trimmed)
+                    val arr = JSONArray()
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val accountObj = obj.optJSONObject(key)
+                        if (accountObj != null) {
+                            arr.put(accountObj)
+                        }
+                    }
+                    arr
+                } else {
+                    null
+                }
             } catch (_: Exception) { null }
         }
 
@@ -265,6 +361,8 @@ class IspPanelSettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnAddIsp).setOnClickListener { showAddAccountDialog() }
         findViewById<Button>(R.id.btnAddDealer).setOnClickListener { showAddAccountDialog() }
+        findViewById<Button>(R.id.btnExportSettings)?.setOnClickListener { exportSettings() }
+        findViewById<Button>(R.id.btnImportSettings)?.setOnClickListener { importSettings() }
 
         loadAccountsUI()
     }
@@ -429,12 +527,12 @@ class IspPanelSettingsActivity : AppCompatActivity() {
 
     private fun showDeleteConfirmDialog(accountName: String) {
         val input = EditText(this).apply {
-            hint = "Enter Password or Master Pin (1912)"
+            hint = "Enter Security PIN or Password"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         AlertDialog.Builder(this)
-            .setTitle("Delete Account: $accountName")
-            .setMessage("Enter the account password or master override pin (1912) to delete:")
+            .setTitle("Delete Account")
+            .setMessage("Are you sure you want to delete '$accountName'? Enter security PIN or account password to confirm:")
             .setView(input)
             .setPositiveButton("Delete") { _, _ ->
                 val entered = input.text.toString().trim()
@@ -446,12 +544,254 @@ class IspPanelSettingsActivity : AppCompatActivity() {
                     all.remove(accountName)
                     saveAllAccountsJson(all)
                     loadAccountsUI()
-    Toast.makeText(this, "Product/Account deleted.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Account deleted.", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(this, "Incorrect password or pin.", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private var pendingExportData: String? = null
+
+    private val exportFileLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val data = pendingExportData
+        if (uri != null && data != null) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    output.write(data.toByteArray(Charsets.UTF_8))
+                }
+                Toast.makeText(this, "Settings file saved successfully!", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Log.e("IspPanelSettings", "File export failed", e)
+                Toast.makeText(this, "Failed to save file: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+        pendingExportData = null
+    }
+
+    private val importFileLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val content = contentResolver.openInputStream(uri)?.use { input ->
+                    input.bufferedReader().readText()
+                }
+                if (!content.isNullOrBlank()) {
+                    processImportContent(content)
+                } else {
+                    Toast.makeText(this, "Selected file is empty.", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("IspPanelSettings", "File import failed", e)
+                Toast.makeText(this, "Failed to read file: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun encodeExportData(jsonString: String): String {
+        val payload = "EBONE_ISP_CONFIG_V1::$jsonString"
+        return Base64.encodeToString(payload.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    }
+
+    private fun decodeImportData(encodedData: String): String? {
+        return try {
+            val trimmed = encodedData.trim()
+            val decoded = String(Base64.decode(trimmed, Base64.NO_WRAP), Charsets.UTF_8)
+            if (decoded.startsWith("EBONE_ISP_CONFIG_V1::")) {
+                decoded.substring("EBONE_ISP_CONFIG_V1::".length)
+            } else if (decoded.startsWith("{") || decoded.startsWith("[")) {
+                decoded
+            } else if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                trimmed
+            } else null
+        } catch (_: Exception) {
+            if (encodedData.trim().startsWith("{") || encodedData.trim().startsWith("[")) encodedData.trim() else null
+        }
+    }
+
+    private fun exportSettings() {
+        val accounts = loadAllAccountsJson()
+        if (accounts.length() == 0) {
+            Toast.makeText(this, "No saved accounts to export.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val jsonString = accounts.toString()
+        val exportCode = encodeExportData(jsonString)
+
+        val summaryList = mutableListOf<String>()
+        val keys = accounts.keys()
+        while (keys.hasNext()) {
+            val name = keys.next()
+            val obj = accounts.getJSONObject(name)
+            val isp = obj.optString("isp", "EBONE")
+            val zone = accountZone(obj)
+            val isDealer = obj.optBoolean("isDealer", false)
+            val dealerName = obj.optString("dealerName", "")
+            val type = if (isDealer) "Dealer ($dealerName)" else "Franchise"
+            summaryList.add("• $name: $isp ($zone) — $type")
+        }
+
+        val dialogView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 24, 32, 24)
+        }
+
+        val summaryTv = TextView(this).apply {
+            text = "Accounts to export:\n" + summaryList.joinToString("\n") + "\n\nExport Code / File Content:"
+            textSize = 14f
+            setTextColor(Color.parseColor("#37474F"))
+            setPadding(0, 0, 0, 8)
+        }
+
+        val btnSaveFile = Button(this).apply {
+            text = "📁 Save to File (.ebone / .json)"
+            setBackgroundColor(Color.parseColor("#2E7D32"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                pendingExportData = exportCode
+                exportFileLauncher.launch("isp_settings.ebone")
+            }
+        }
+
+        val codeBox = EditText(this).apply {
+            setText(exportCode)
+            textSize = 12f
+            maxLines = 4
+            isFocusable = true
+            isClickable = true
+            setSelectAllOnFocus(true)
+        }
+
+        dialogView.addView(summaryTv)
+        dialogView.addView(btnSaveFile)
+        dialogView.addView(codeBox)
+
+        AlertDialog.Builder(this)
+            .setTitle("Export ISP Settings (${accounts.length()} Accounts)")
+            .setView(dialogView)
+            .setPositiveButton("Copy Code") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("ISP Panel Settings", exportCode)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(this, "Settings code copied to clipboard!", Toast.LENGTH_LONG).show()
+            }
+            .setNeutralButton("Share") { _, _ ->
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "Ebone Admin Panel - ISP Settings Export")
+                    putExtra(Intent.EXTRA_TEXT, exportCode)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Share Settings Export"))
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun importSettings() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 24, 32, 24)
+        }
+
+        val btnSelectFile = Button(this).apply {
+            text = "📁 Select File to Import (.ebone / .json)"
+            setBackgroundColor(Color.parseColor("#00838F"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                importFileLauncher.launch(arrayOf("*/*", "application/json", "text/plain"))
+            }
+        }
+
+        val label = TextView(this).apply {
+            text = "Or paste exported settings code below:"
+            textSize = 14f
+            setTextColor(Color.parseColor("#37474F"))
+            setPadding(0, 16, 0, 8)
+        }
+
+        val codeInput = EditText(this).apply {
+            hint = "Paste code here..."
+            textSize = 12f
+            minLines = 3
+            maxLines = 6
+        }
+
+        val btnPaste = Button(this).apply {
+            text = "📋 Paste from Clipboard"
+            setBackgroundColor(Color.parseColor("#1565C0"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                val clipData = clipboard.primaryClip
+                if (clipData != null && clipData.itemCount > 0) {
+                    val text = clipData.getItemAt(0).text?.toString() ?: ""
+                    codeInput.setText(text)
+                } else {
+                    Toast.makeText(this@IspPanelSettingsActivity, "Clipboard is empty.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        layout.addView(btnSelectFile)
+        layout.addView(label)
+        layout.addView(codeInput)
+        layout.addView(btnPaste)
+
+        AlertDialog.Builder(this)
+            .setTitle("Import ISP Settings")
+            .setView(layout)
+            .setPositiveButton("Import") { _, _ ->
+                val rawInput = codeInput.text.toString().trim()
+                if (rawInput.isNotEmpty()) {
+                    processImportContent(rawInput)
+                } else {
+                    Toast.makeText(this, "Please select a file or paste export code.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun processImportContent(rawInput: String) {
+        val jsonPayload = decodeImportData(rawInput)
+        if (jsonPayload.isNullOrBlank()) {
+            Toast.makeText(this, "Invalid export file/code format.", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        try {
+            val importedObj = JSONObject(jsonPayload)
+            val currentObj = loadAllAccountsJson()
+            var importedCount = 0
+
+            val keys = importedObj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val accountData = importedObj.optJSONObject(key)
+                if (accountData != null) {
+                    currentObj.put(key, accountData)
+                    importedCount++
+                }
+            }
+
+            if (importedCount == 0) {
+                Toast.makeText(this, "No valid accounts found in file/code.", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            saveAllAccountsJson(currentObj)
+            loadAccountsUI()
+            Toast.makeText(this, "Successfully imported $importedCount accounts!", Toast.LENGTH_LONG).show()
+
+        } catch (e: Exception) {
+            Log.e("IspPanelSettings", "Import failed", e)
+            Toast.makeText(this, "Import failed: Invalid file content.", Toast.LENGTH_LONG).show()
+        }
     }
 }

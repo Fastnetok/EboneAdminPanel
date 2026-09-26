@@ -18,7 +18,12 @@ object WebViewRouter {
     }
 
     fun launch(context: Context, isp: String?, zone: String?, extras: Intent.() -> Unit = {}) {
-        val intent = Intent(context, getTargetActivity(isp, zone))
+        val cleanIsp = isp?.uppercase() ?: "EBONE"
+        val cleanZone = if (zone.isNullOrBlank()) "Okara" else zone
+        val intent = Intent(context, getTargetActivity(cleanIsp, cleanZone))
+        intent.putExtra("selected_isp", cleanIsp)
+        intent.putExtra("target_zone", cleanZone)
+        intent.putExtra("zone", cleanZone)
         intent.apply(extras)
         context.startActivity(intent)
     }
