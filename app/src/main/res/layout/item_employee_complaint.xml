@@ -25,22 +25,38 @@
             android:layout_alignParentStart="true"
             android:layout_centerVertical="true"/>
 
-        <TextView
-            android:id="@+id/tvLogCompany"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_log_company_badge"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:text=""
-            android:textColor="#4C5FD5"
-            android:textSize="11sp"
-            android:textStyle="bold"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
-            android:visibility="gone"/>
+            android:layout_centerVertical="true">
+
+            <View
+                android:id="@+id/viewOnlineCircle"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/bg_status_circle_gray"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvLogCompany"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_log_company_badge"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:text=""
+                android:textColor="#4C5FD5"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone"/>
+
+        </LinearLayout>
 
     </RelativeLayout>
 

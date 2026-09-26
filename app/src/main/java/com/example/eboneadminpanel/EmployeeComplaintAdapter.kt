@@ -18,6 +18,13 @@ class EmployeeComplaintAdapter(
     private val complaintList: MutableList<Complaint>
 ) : RecyclerView.Adapter<EmployeeComplaintAdapter.ViewHolder>() {
 
+    val onlineStatusMap = HashMap<String, Boolean?>()
+
+    fun updateOnlineStatus(complaintId: String, isOnline: Boolean?) {
+        onlineStatusMap[complaintId] = isOnline
+        notifyDataSetChanged()
+    }
+
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
 
         val userIdText: TextView =
@@ -25,6 +32,9 @@ class EmployeeComplaintAdapter(
 
         val tvLogCompany: TextView =
             itemView.findViewById(R.id.tvLogCompany)
+
+        val viewOnlineCircle: View =
+            itemView.findViewById(R.id.viewOnlineCircle)
 
         val addressText: TextView =
             itemView.findViewById(R.id.addressText)
@@ -86,6 +96,7 @@ class EmployeeComplaintAdapter(
         if (company.isEmpty()) {
 
             holder.tvLogCompany.visibility = View.GONE
+            holder.viewOnlineCircle.visibility = View.GONE
 
         } else {
 
@@ -97,6 +108,14 @@ class EmployeeComplaintAdapter(
             }
 
             holder.tvLogCompany.visibility = View.VISIBLE
+            holder.viewOnlineCircle.visibility = View.VISIBLE
+
+            val status = onlineStatusMap[complaint.complaintId]
+            when (status) {
+                true -> holder.viewOnlineCircle.setBackgroundResource(R.drawable.bg_status_circle_green)
+                false -> holder.viewOnlineCircle.setBackgroundResource(R.drawable.bg_status_circle_red)
+                null -> holder.viewOnlineCircle.setBackgroundResource(R.drawable.bg_status_circle_gray)
+            }
         }
 
         holder.addressText.text = complaint.address
