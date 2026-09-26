@@ -121,10 +121,6 @@ class AddComplaintActivity : AppCompatActivity() {
                         val filteredList = mutableListOf<String>()
                         val finalEmployeeNames = mutableListOf<String>()
 
-                        // New Protocol: Add NEW CONNECTION option at the top
-                        filteredList.add("⭐ NEW CONNECTION (Intake)")
-                        finalEmployeeNames.add("NEW_CONNECTION_INTAKE")
-
                         val presentEmployees = mutableListOf<Pair<String, String>>()
                         val absentEmployees = mutableListOf<Pair<String, String>>()
 
@@ -151,7 +147,7 @@ class AddComplaintActivity : AppCompatActivity() {
                             filteredList.add("🔴 $name (Offline | Active: $count)")
                         }
 
-                        if (finalEmployeeNames.size <= 1) {
+                        if (finalEmployeeNames.isEmpty()) {
                             Toast.makeText(this, "Koi employee registered nahi hai", Toast.LENGTH_LONG).show()
                             return@addOnSuccessListener
                         }
@@ -163,30 +159,7 @@ class AddComplaintActivity : AppCompatActivity() {
                                 val selectedEmployee = finalEmployeeNames[which]
                                 val currentTime = System.currentTimeMillis()
 
-                                // NEW PROTOCOL: Save inside officeSettings to ensure Permission
-                                if (selectedEmployee == "NEW_CONNECTION_INTAKE") {
-                                    val connId = fb.getReference("officeSettings/new_connections/pending").push().key ?: return@setItems
-                                    val newConn = NewConnection(
-                                        id = connId,
-                                        customerName = userId,
-                                        address = address,
-                                        phoneNumber = phone,
-                                        comments = details,
-                                        status = "Pending",
-                                        createdTime = currentTime
-                                    )
-                                    fb.getReference("officeSettings/new_connections/pending").child(connId).setValue(newConn)
-                                        .addOnSuccessListener {
-                                            Toast.makeText(this, "New Connection Intake mein save ho gaya", Toast.LENGTH_SHORT).show()
-                                            finish()
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Toast.makeText(this, "Save Failed: ${e.message}", Toast.LENGTH_LONG).show()
-                                        }
-                                    return@setItems
-                                }
-
-                                // OLD STABLE LOGIC: For normal complaints
+                                // Normal complaints assignment logic
                                 repeatManager.checkRepeatComplaint(userId) { repeatInfo ->
                                     if (repeatInfo.isRepeat) {
                                         val resolveDate = if (repeatInfo.lastResolvedTime > 0) {

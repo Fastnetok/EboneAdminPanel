@@ -9,15 +9,8 @@ import com.google.firebase.database.*
 
 /*
  * Exact copy of PendingSummaryActivity.kt's rule (Complaints):
- * for each employee, total items held minus 1 (their front-of-queue
- * item, already shown in Progress) = Pending. Reuses the generic
- * activity_new_connections layout, same as
- * NewConnectionProgressActivity / NewConnectionTotalActivity.
- *
- * Source data is gift_box directly (not a flat "complaints"-style
- * node with a status field) — every item in gift_box is by definition
- * still active (installed items are moved out to "completed"), so no
- * extra status filtering is needed here, unlike PendingSummaryActivity.
+ * Displays all pending connections — both unassigned intake pool
+ * and queued items held by employees beyond their active Progress item.
  */
 class NewConnectionPendingSummaryActivity : AppCompatActivity() {
 
@@ -42,30 +35,47 @@ class NewConnectionPendingSummaryActivity : AppCompatActivity() {
     }
 
     private fun loadPendingSummary() {
-        FirebaseDatabase.getInstance()
-            .getReference("officeSettings/new_connections/gift_box")
-            .addValueEventListener(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    employeeList.clear()
+        val root = FirebaseDatabase.getInstance().getReference("officeSettings/new_connections")
+        
+        root.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                employeeList.clear()
 
-                    for (employeeNode in snapshot.children) {
-                        val employee = employeeNode.key ?: continue
-                        val total = employeeNode.childrenCount.toInt()
+                // 1. Unassigned Intake pending connections
+                val pendingNode = snapshot.child("pending")
+                var intakePendingCount = 0
+                for (child in pendingNode.children) {
+                    val conn = child.getValue(NewConnection::class.java)
+                    if (conn != null && (!conn.customerName.isNullOrBlank() || !conn.id.isNullOrBlank())) {
+                        intakePendingCount++
+                    }
+                }
+                if (intakePendingCount > 0) {
+                    employeeList.add("Unassigned Intake ($intakePendingCount)")
+                }
 
-                        // SAME RULE: one item per employee is their
-                        // Progress (front-of-queue) item — everything
-                        // else is Pending.
-                        val pending = if (total > 1) total - 1 else 0
-
-                        if (pending > 0) {
-                            employeeList.add("$employee ($pending)")
+                // 2. Queued pending connections held by employees in gift_box
+                val giftBoxNode = snapshot.child("gift_box")
+                for (employeeNode in giftBoxNode.children) {
+                    val employee = employeeNode.key ?: continue
+                    var validCount = 0
+                    for (child in employeeNode.children) {
+                        val conn = child.getValue(NewConnection::class.java)
+                        if (conn != null && (!conn.customerName.isNullOrBlank() || !conn.id.isNullOrBlank())) {
+                            validCount++
                         }
                     }
 
-                    adapter.notifyDataSetChanged()
+                    val pending = if (validCount > 1) validCount - 1 else 0
+                    if (pending > 0) {
+                        employeeList.add("$employee ($pending)")
+                    }
                 }
 
-                override fun onCancelled(error: DatabaseError) {}
-            })
+                adapter.notifyDataSetChanged()
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
     }
 }

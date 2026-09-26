@@ -48,11 +48,14 @@
     </LinearLayout>
 
     <ScrollView
+        android:id="@+id/scrollViewNc"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:fillViewport="true">
 
         <LinearLayout
+            android:id="@+id/innerContentLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
@@ -158,15 +161,14 @@
                     android:id="@+id/etNcName"
                     android:layout_width="match_parent"
                     android:layout_height="50dp"
-                    android:hint="User ID"
+                    android:hint="Customer ID"
                     android:background="@drawable/bg_spinner"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp"
                     android:textSize="14sp"
                     android:textColor="#1F2937"
-                    android:inputType="textFilter|textNoSuggestions|textVisiblePassword"
+                    android:inputType="textNoSuggestions"
                     android:importantForAutofill="no"
-                    tools:ignore="TextFields"
                     android:layout_marginBottom="12dp" />
 
                 <EditText
@@ -199,14 +201,14 @@
                     android:id="@+id/etNcComments"
                     android:layout_width="match_parent"
                     android:layout_height="110dp"
-                    android:hint="Connection Details (Tap to Type)"
+                    android:hint="Connection Details"
                     android:gravity="top"
                     android:padding="12dp"
                     android:textSize="14sp"
                     android:textColor="#1F2937"
                     android:background="@drawable/bg_spinner"
-                    android:focusable="false"
-                    android:clickable="true"
+                    android:inputType="textMultiLine"
+                    android:importantForAutofill="no"
                     android:layout_marginBottom="24dp" />
 
                 <Button

@@ -1,20 +1,21 @@
 package com.example.eboneadminpanel
 
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Bundle
-import android.text.InputType
-import android.view.Gravity
-import android.view.ViewGroup
+import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.Button
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import com.google.firebase.database.*
+import java.util.Calendar
 
 class NewConnectionDashboardActivity : AppCompatActivity() {
 
@@ -28,6 +29,10 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
     private lateinit var etNcPhone: EditText
     private lateinit var etNcComments: EditText
     private lateinit var btnAssignNc: Button
+    private lateinit var scrollViewNc: ScrollView
+    private lateinit var innerContentLayout: LinearLayout
+
+    private var keyboardLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +53,57 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
         etNcPhone = findViewById(R.id.etNcPhone)
         etNcComments = findViewById(R.id.etNcComments)
         btnAssignNc = findViewById(R.id.btnAssignNc)
+        scrollViewNc = findViewById(R.id.scrollViewNc)
+        innerContentLayout = findViewById(R.id.innerContentLayout)
+
+        // Robust Keyboard-Aware WindowInsets / GlobalLayout automatic scrolling mechanism
+        keyboardLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
+            val r = Rect()
+            scrollViewNc.getWindowVisibleDisplayFrame(r)
+            val screenHeight = scrollViewNc.rootView.height
+            val keypadHeight = screenHeight - r.bottom
+
+            if (keypadHeight > screenHeight * 0.15) {
+                // Keyboard is open — add bottom padding to ScrollView so top cards can scroll off-screen and form/button are fully accessible
+                scrollViewNc.setPadding(
+                    scrollViewNc.paddingLeft,
+                    scrollViewNc.paddingTop,
+                    scrollViewNc.paddingRight,
+                    keypadHeight + 200
+                )
+
+                val focused = currentFocus
+                if (focused != null) {
+                    scrollViewNc.post {
+                        scrollViewNc.smoothScrollTo(0, focused.top - 30)
+                    }
+                }
+            } else {
+                // Keyboard is closed — reset padding
+                if (scrollViewNc.paddingBottom != 0) {
+                    scrollViewNc.setPadding(
+                        scrollViewNc.paddingLeft,
+                        scrollViewNc.paddingTop,
+                        scrollViewNc.paddingRight,
+                        0
+                    )
+                }
+            }
+        }
+        scrollViewNc.viewTreeObserver.addOnGlobalLayoutListener(keyboardLayoutListener)
+
+        val focusListener = View.OnFocusChangeListener { v, hasFocus ->
+            if (hasFocus) {
+                scrollViewNc.postDelayed({
+                    val topCoord = v.top - 30
+                    scrollViewNc.smoothScrollTo(0, if (topCoord > 0) topCoord else 0)
+                }, 200)
+            }
+        }
+        etNcName.onFocusChangeListener = focusListener
+        etNcAddress.onFocusChangeListener = focusListener
+        etNcPhone.onFocusChangeListener = focusListener
+        etNcComments.onFocusChangeListener = focusListener
 
         // Click Listeners
         tvTotal.setOnClickListener {
@@ -71,41 +127,14 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
             handleNcAssignment()
         }
 
-        etNcComments.setOnClickListener {
-            showCommentsDialog()
-        }
-
         loadStats()
     }
 
-    private fun showCommentsDialog() {
-        val builder = AlertDialog.Builder(this)
-        builder.setTitle("Connection Details")
-
-        val input = EditText(this)
-        input.gravity = Gravity.TOP
-        input.minLines = 5
-        input.setPadding(40, 40, 40, 40)
-        input.background = ContextCompat.getDrawable(this, R.drawable.bg_spinner)
-        input.setText(etNcComments.text.toString())
-        input.hint = "Type or use Microphone..."
-        input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-
-        val container = FrameLayout(this)
-        val params = FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        params.setMargins(40, 20, 40, 20)
-        container.addView(input, params)
-        builder.setView(container)
-
-        builder.setPositiveButton("Done") { _, _ ->
-            etNcComments.setText(input.text.toString())
+    override fun onDestroy() {
+        super.onDestroy()
+        keyboardLayoutListener?.let {
+            scrollViewNc.viewTreeObserver.removeOnGlobalLayoutListener(it)
         }
-        builder.setNegativeButton("Cancel", null)
-
-        builder.show()
     }
 
     private fun handleNcAssignment() {
@@ -166,6 +195,8 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
                                 .addOnSuccessListener {
                                     Toast.makeText(this, "Assigned to $selectedEmployee", Toast.LENGTH_SHORT).show()
                                     etNcName.setText(""); etNcAddress.setText(""); etNcPhone.setText(""); etNcComments.setText("")
+                                    // Return to normal/initial position upon successful assignment
+                                    scrollViewNc.smoothScrollTo(0, 0)
                                 }
                         }
                         .setNegativeButton("Cancel", null).show()
@@ -174,79 +205,64 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
         }
     }
 
-    /*
-     * CONFIRMED CORRECT — directly matches Complaints' own
-     * PendingSummaryActivity.kt ("pending = total - 1 per employee")
-     * and ProgressActivity.kt (one front-of-queue item per employee):
-     *
-     *   Progress = number of UNIQUE employees currently holding at
-     *              least 1 connection (gift_box) — each employee
-     *              contributes exactly ONE item here: the front of
-     *              their queue.
-     *   Pending  = every OTHER item an employee is holding beyond
-     *              their one front-of-queue item — i.e.
-     *              TotalAllTime - Progress - Installed. This is NOT
-     *              a mismatch with reality: Pending counts items
-     *              still queued behind an employee's active item,
-     *              not a literal "unassigned intake" count.
-     *   Total    = Pending + Progress (an item count).
-     *
-     * New Connection data is split across 3 separate nodes
-     * (pending / gift_box / completed) instead of one flat node like
-     * "complaints", so TotalAllTime here is rebuilt by adding up all 3
-     * node's item counts.
-     */
     private fun loadStats() {
-
         val dbRoot = FirebaseDatabase.getInstance()
             .getReference("officeSettings/new_connections")
 
-        // Midnight timestamp — only the "Installed today" display
-        // resets using this. Nothing about Total/Pending/Progress is
-        // affected by midnight.
-        val todayStart = java.util.Calendar.getInstance().apply {
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }.timeInMillis
-
         dbRoot.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-
-                // A) Items still sitting in the raw intake pool — this
-                //    IS the Pending count now (previously computed but
-                //    then discarded in favor of a subtraction).
-                val pendingNodeCount = snapshot.child("pending").childrenCount.toInt()
-
-                // B) gift_box — total items (for TotalAllTime) AND
-                //    unique-employee count (for Progress), same pattern
-                //    as complaints' progressEmployees HashSet.
-                var giftBoxTotalItems = 0
-                val progressEmployees = HashSet<String>()
-                val giftBoxNode = snapshot.child("gift_box")
-                for (employee in giftBoxNode.children) {
-                    val empItemCount = employee.childrenCount.toInt()
-                    giftBoxTotalItems += empItemCount
-                    if (empItemCount > 0) {
-                        progressEmployees.add(employee.key ?: "")
+                // 1. Intake pending items
+                var intakePendingCount = 0
+                val pendingNode = snapshot.child("pending")
+                for (child in pendingNode.children) {
+                    val conn = child.getValue(NewConnection::class.java)
+                    if (conn != null && (!conn.customerName.isNullOrBlank() || !conn.id.isNullOrBlank())) {
+                        intakePendingCount++
+                    } else {
+                        child.ref.removeValue()
                     }
                 }
-                val progressCount = progressEmployees.size
 
-                // C) completed — 3 levels deep: {Year}/{Month}/{Day}/{id}
-                //    completedAllTimeCount -> used in TotalAllTime
-                //    installedTodayCount   -> used only for the Installed box display
-                var completedAllTimeCount = 0
+                // 2. PROGRESS (Front-of-queue active item per employee) & Queued Pending items
+                var progressCount = 0
+                var queuedPendingCount = 0
+
+                val giftBoxNode = snapshot.child("gift_box")
+                for (employee in giftBoxNode.children) {
+                    var empItemCount = 0
+                    for (child in employee.children) {
+                        val conn = child.getValue(NewConnection::class.java)
+                        if (conn != null && (!conn.customerName.isNullOrBlank() || !conn.id.isNullOrBlank())) {
+                            empItemCount++
+                        } else {
+                            child.ref.removeValue()
+                        }
+                    }
+                    if (empItemCount > 0) {
+                        progressCount++ // 1 active item in Progress for this employee
+                        queuedPendingCount += (empItemCount - 1) // Any extra items are queued Pending
+                    }
+                }
+
+                val totalPendingCount = intakePendingCount + queuedPendingCount
+
+                // 3. INSTALLED: Completed items installed TODAY (Midnight reset rule)
+                val todayStart = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+
                 var installedTodayCount = 0
                 val completedNode = snapshot.child("completed")
                 for (yearNode in completedNode.children) {
                     for (monthNode in yearNode.children) {
                         for (dayNode in monthNode.children) {
                             for (item in dayNode.children) {
-                                completedAllTimeCount++
-                                val compTime = item.child("completionTime")
-                                    .getValue(Long::class.java) ?: 0L
+                                val compTime = item.child("completionTime").getValue(Long::class.java)
+                                    ?: item.child("createdTime").getValue(Long::class.java)
+                                    ?: 0L
                                 if (compTime >= todayStart) {
                                     installedTodayCount++
                                 }
@@ -255,23 +271,13 @@ class NewConnectionDashboardActivity : AppCompatActivity() {
                     }
                 }
 
-                // D) TotalAllTime — an item count, built by adding up all
-                //    3 nodes.
-                val totalAllTime = pendingNodeCount + giftBoxTotalItems + completedAllTimeCount
+                // 4. TOTAL ACTIVE = PENDING + PROGRESS
+                val totalCount = totalPendingCount + progressCount
 
-                // E) SAME subtraction rule as Complaints (confirmed
-                //    against PendingSummaryActivity.kt).
-                var pendingCount = totalAllTime - progressCount - completedAllTimeCount
-                if (pendingCount < 0) {
-                    pendingCount = 0
-                }
-
-                val totalCount = pendingCount + progressCount
-
-                tvPending.text = "$pendingCount\nPENDING"
+                tvTotal.text = "$totalCount\nTOTAL"
+                tvPending.text = "$totalPendingCount\nPENDING"
                 tvProgress.text = "$progressCount\nPROGRESS"
                 tvInstalled.text = "$installedTodayCount\nINSTALLED"
-                tvTotal.text = "$totalCount\nTOTAL"
             }
 
             override fun onCancelled(error: DatabaseError) {}
