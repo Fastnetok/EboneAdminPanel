@@ -2,12 +2,15 @@ package com.example.eboneadminpanel
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.TextView
@@ -73,6 +76,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                     }
                     complaintList.sortBy { it.displayOrder }
                     adapter.notifyDataSetChanged()
+                    allFinishedBeepPlayed = false
                     startCheckingQueues()
                 }
 
@@ -102,6 +106,43 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             )
             prefs.edit().putString("${isp}_$zone", cookie).apply()
         } catch (e: Exception) { }
+    }
+
+    private var allFinishedBeepPlayed = false
+
+    private fun playBeeps(count: Int, intervalMs: Long = 400) {
+        try {
+            val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+            val handler = Handler(Looper.getMainLooper())
+            for (i in 0 until count) {
+                handler.postDelayed({
+                    try {
+                        toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 200)
+                    } catch (_: Exception) {}
+                }, (i * intervalMs))
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun handleStatusResult(complaintId: String, isOnline: Boolean) {
+        adapter.updateOnlineStatus(complaintId, isOnline)
+        if (isOnline) {
+            playBeeps(1) // Green -> 1 beep
+        } else {
+            playBeeps(2, 550) // Red -> 2 beeps with 550ms gap
+        }
+        checkAllQueuesFinished()
+    }
+
+    private fun checkAllQueuesFinished() {
+        if (complaintList.isNotEmpty() && adapter.onlineStatusMap.size >= complaintList.size) {
+            if (!allFinishedBeepPlayed) {
+                allFinishedBeepPlayed = true
+                Handler(Looper.getMainLooper()).postDelayed({
+                    playBeeps(3, 300) // All complete -> 3 beeps with 300ms gap
+                }, 800)
+            }
+        }
     }
 
     private fun startCheckingQueues() {
@@ -160,6 +201,8 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
+                settings.blockNetworkImage = true
+                settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
                 settings.userAgentString = "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             }
         }
@@ -184,7 +227,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         if (wvZong == null) {
             wvZong = WebView(this).apply {
                 settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
+                settings.databaseEnabled = true
                 settings.databaseEnabled = true
                 settings.userAgentString = "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             }
@@ -198,7 +241,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
             return
         }
         val complaint = eboneQueue.removeAt(0)
-        
+
         if (adapter.onlineStatusMap.containsKey(complaint.complaintId)) {
             processNextEbone()
             return
@@ -215,11 +258,11 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         }
 
         val loginUrl = "https://partner.ebill.pk/logincheck"
-        val onlineUrl = "https://partner.ebill.pk/clients"
+        val onlineUrl = "https://partner.ebill.pk/online"
         val searchSelector = "input[aria-controls=\"example1\"]"
 
         val webView = getOrCreateEboneWebView()
-        
+
         val savedCookie = getIspSessionCookie("EBONE", zone)
         if (savedCookie.isNotEmpty()) {
             savedCookie.split(";").forEach { CookieManager.getInstance().setCookie("https://partner.ebill.pk", it.trim()) }
@@ -228,7 +271,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
 
         var isFinished = false
         val handler = Handler(Looper.getMainLooper())
-        
+
         val timeoutRunnable = Runnable {
             if (!isFinished) {
                 isFinished = true
@@ -236,7 +279,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 processNextEbone()
             }
         }
-        handler.postDelayed(timeoutRunnable, 25000)
+        handler.postDelayed(timeoutRunnable, 15000)
 
         webView.webViewClient = object : WebViewClient() {
             var loginAttempted = false
@@ -244,7 +287,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (isFinished || url == null) return
-                
+
                 val currentCookie = CookieManager.getInstance().getCookie("https://partner.ebill.pk")
                 if (!currentCookie.isNullOrEmpty()) saveIspSessionCookie("EBONE", zone, currentCookie)
 
@@ -254,12 +297,12 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                         webView.evaluateJavascript("(function(){ document.querySelector('input[name=username]').value='$user'; document.querySelector('input[name=password]').value='$pass'; document.querySelector('button[type=submit]').click(); })()", null)
                     }
                 } else if (url.contains("partner.ebill.pk")) {
-                    if (!url.contains("/clients")) {
+                    if (!url.contains("/online")) {
                         webView.loadUrl(onlineUrl)
                     } else {
                         if (!searchAttempted) {
                             searchAttempted = true
-                            webView.evaluateJavascript("(function(){ var box = document.querySelector('$searchSelector'); if(box){ box.value = '${complaint.userId}'; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ if(document.body.innerText.indexOf('${complaint.userId}') > -1 && document.body.innerText.indexOf('Online Customers') > -1){ window.location.href = \"resolve://success\"; } else { window.location.href = \"resolve://failed\"; } }, 3000); } else { window.location.href = \"resolve://failed\"; } })()", null)
+                            webView.evaluateJavascript("(function(){ var targetUser = '${complaint.userId}'.toLowerCase().trim(); var box = document.querySelector('$searchSelector'); if(box){ box.value = ''; box.focus(); box.value = targetUser; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ var table = document.getElementById('example1'); var result = 'failed'; if(table){ var emptyRow = table.querySelector('.dataTables_empty'); if(!emptyRow){ var rows = table.querySelectorAll('tbody tr'); for(var i=0; i<rows.length; i++){ var rowText = rows[i].innerText.toLowerCase(); if(rowText.indexOf(targetUser) > -1){ result = 'success'; break; } } } } window.location.href = 'resolve://' + result; }, 800); } else { window.location.href = '$onlineUrl'; } })();", null)
                         }
                     }
                 }
@@ -270,13 +313,13 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 if (url == "resolve://success") {
                     isFinished = true
                     handler.removeCallbacks(timeoutRunnable)
-                    adapter.updateOnlineStatus(complaint.complaintId, true)
+                    handleStatusResult(complaint.complaintId, true)
                     processNextEbone()
                     return true
                 } else if (url == "resolve://failed") {
                     isFinished = true
                     handler.removeCallbacks(timeoutRunnable)
-                    adapter.updateOnlineStatus(complaint.complaintId, false)
+                    handleStatusResult(complaint.complaintId, false)
                     processNextEbone()
                     return true
                 }
@@ -365,13 +408,13 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 if (url == "resolve://success") {
                     isFinished = true
                     handler.removeCallbacks(timeoutRunnable)
-                    adapter.updateOnlineStatus(complaint.complaintId, true)
+                    handleStatusResult(complaint.complaintId, true)
                     processNextWateen()
                     return true
                 } else if (url == "resolve://failed") {
                     isFinished = true
                     handler.removeCallbacks(timeoutRunnable)
-                    adapter.updateOnlineStatus(complaint.complaintId, false)
+                    handleStatusResult(complaint.complaintId, false)
                     processNextWateen()
                     return true
                 }
@@ -460,13 +503,13 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                 if (url == "resolve://success") {
                     isFinished = true
                     handler.removeCallbacks(timeoutRunnable)
-                    adapter.updateOnlineStatus(complaint.complaintId, true)
+                    handleStatusResult(complaint.complaintId, true)
                     processNextZong()
                     return true
                 } else if (url == "resolve://failed") {
                     isFinished = true
                     handler.removeCallbacks(timeoutRunnable)
-                    adapter.updateOnlineStatus(complaint.complaintId, false)
+                    handleStatusResult(complaint.complaintId, false)
                     processNextZong()
                     return true
                 }
