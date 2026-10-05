@@ -180,6 +180,10 @@ class ReportsActivity : AppCompatActivity() {
         ).show()
     }
 
+    private fun loadOverallReport() {
+        loadCustomDateRangeReport("📊 OVERALL REPORTS", "", 0L, Long.MAX_VALUE, isMonthLabel = false)
+    }
+
     // MONTHLY REPORTS — open current calendar month directly.
     private fun showMonthSelector() {
         val currentCalendar = Calendar.getInstance()
@@ -275,9 +279,12 @@ class ReportsActivity : AppCompatActivity() {
                                     ?: (cs.child("isNewConnection").getValue(String::class.java)?.toBoolean() ?: false)
                                 if (isNewConnection) return
 
-                                val createdTime = cs.child("createdTime").getValue(Long::class.java) ?: 0L
-                                val resolvedTime = cs.child("resolvedTime").getValue(Long::class.java) ?: 0L
-                                val assignedTime = cs.child("assignedTime").getValue(Long::class.java) ?: 0L
+                                val createdTime = cs.child("createdTime").getValue(Long::class.java)
+                                    ?: cs.child("createdTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                                val resolvedTime = cs.child("resolvedTime").getValue(Long::class.java)
+                                    ?: cs.child("resolvedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                                val assignedTime = cs.child("assignedTime").getValue(Long::class.java)
+                                    ?: cs.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
 
                                 // Check date range
                                 val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)

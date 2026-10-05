@@ -117,7 +117,14 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
         ncFilterText = findViewById(R.id.ncFilterText)
 
         setupEmployeeSpinner()
-        selectCurrentMonth()
+        val passedFromMs = intent.getLongExtra("fromMs", -1L)
+        val passedToMs = intent.getLongExtra("toMs", -1L)
+        if (passedFromMs != -1L && passedToMs != -1L) {
+            selectedStartTime = passedFromMs
+            selectedEndTime = passedToMs
+        } else {
+            selectCurrentMonth()
+        }
 
         updateRepeatViewButtons()
 
@@ -425,6 +432,16 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
         return false
     }
 
+    private fun getComplaintTime(cs: DataSnapshot): Long {
+        return cs.child("createdTime").getValue(Long::class.java)
+            ?: cs.child("createdTime").getValue(String::class.java)?.toLongOrNull()
+            ?: cs.child("timestamp").getValue(Long::class.java)
+            ?: cs.child("timestamp").getValue(String::class.java)?.toLongOrNull()
+            ?: cs.child("resolvedTime").getValue(Long::class.java)
+            ?: cs.child("resolvedTime").getValue(String::class.java)?.toLongOrNull()
+            ?: 0L
+    }
+
     private fun fetchOfficeSettingsNewConnections(callback: (Map<String, List<Map<String, String>>>) -> Unit) {
         FirebaseDatabase.getInstance()
             .getReference("officeSettings/new_connections")
@@ -433,8 +450,19 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                     val ncMap = mutableMapOf<String, MutableList<Map<String, String>>>()
 
                     fun addNcItem(empNorm: String, empRaw: String, item: DataSnapshot, defaultStatus: String) {
-                        val createdTime = item.child("createdTime").getValue(Long::class.java) ?: 0L
-                        if (createdTime !in selectedStartTime..selectedEndTime) return
+                        val createdTime = item.child("createdTime").getValue(Long::class.java)
+                            ?: item.child("createdTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                        val resolvedTime = item.child("resolvedTime").getValue(Long::class.java)
+                            ?: item.child("resolvedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                        val assignedTime = item.child("assignedTime").getValue(Long::class.java)
+                            ?: item.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+
+                        val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)
+                        val inRange = (createdTime in selectedStartTime..selectedEndTime) ||
+                                      (resolvedTime in selectedStartTime..selectedEndTime) ||
+                                      (assignedTime in selectedStartTime..selectedEndTime)
+
+                        if (hasTimestamp && !inRange) return
                         if (!isAllEmployeesMode && empNorm.isNotEmpty() && !empNorm.equals(normalizeName(employeeName), true)) return
 
                         val userId = item.child("customerName").getValue(String::class.java)
@@ -530,10 +558,19 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                         for (cs in snapshot.children) {
                             val assignedRaw = cs.child("assignedTo").getValue(String::class.java) ?: ""
                             val assignedNorm = normalizeName(assignedRaw)
-                            val createdTime = cs.child("createdTime").getValue(Long::class.java) ?: 0L
-                            val isNewConn = isNewConnectionNode(cs)
+                            val createdTime = cs.child("createdTime").getValue(Long::class.java)
+                                ?: cs.child("createdTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                            val resolvedTime = cs.child("resolvedTime").getValue(Long::class.java)
+                                ?: cs.child("resolvedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                            val assignedTime = cs.child("assignedTime").getValue(Long::class.java)
+                                ?: cs.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
 
-                            if (createdTime !in selectedStartTime..selectedEndTime) continue
+                            val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)
+                            val inRange = (createdTime in selectedStartTime..selectedEndTime) ||
+                                          (resolvedTime in selectedStartTime..selectedEndTime) ||
+                                          (assignedTime in selectedStartTime..selectedEndTime)
+
+                            if (hasTimestamp && !inRange) continue
                             if (!isAllEmployeesMode && assignedNorm.isNotEmpty() && !assignedNorm.equals(normalizeName(employeeName), true)) continue
 
                             val userId = cs.child("userId").getValue(String::class.java) ?: ""
@@ -547,6 +584,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                                 empDisplayNameMap[targetNorm] = assignedRaw.trim()
                             }
 
+                            val isNewConn = isNewConnectionNode(cs)
                             if (isNewConn) {
                                 if (!empNcItemsMap.containsKey(targetNorm)) {
                                     empNcItemsMap[targetNorm] = mutableListOf()
@@ -610,10 +648,19 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                                     for (cs in resolvedSnapshot.children) {
                                         val assignedRaw = cs.child("assignedTo").getValue(String::class.java) ?: ""
                                         val assignedNorm = normalizeName(assignedRaw)
-                                        val createdTime = cs.child("createdTime").getValue(Long::class.java) ?: 0L
-                                        val isNewConn = isNewConnectionNode(cs)
+                                        val createdTime = cs.child("createdTime").getValue(Long::class.java)
+                                            ?: cs.child("createdTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                                        val resolvedTime = cs.child("resolvedTime").getValue(Long::class.java)
+                                            ?: cs.child("resolvedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                                        val assignedTime = cs.child("assignedTime").getValue(Long::class.java)
+                                            ?: cs.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
 
-                                        if (createdTime !in selectedStartTime..selectedEndTime) continue
+                                        val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)
+                                        val inRange = (createdTime in selectedStartTime..selectedEndTime) ||
+                                                      (resolvedTime in selectedStartTime..selectedEndTime) ||
+                                                      (assignedTime in selectedStartTime..selectedEndTime)
+
+                                        if (hasTimestamp && !inRange) continue
                                         if (!isAllEmployeesMode && assignedNorm.isNotEmpty() && !assignedNorm.equals(normalizeName(employeeName), true)) continue
 
                                         val complaintId = cs.child("complaintId")
@@ -630,6 +677,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                                             empDisplayNameMap[targetNorm] = assignedRaw.trim()
                                         }
 
+                                        val isNewConn = isNewConnectionNode(cs)
                                         if (isNewConn) {
                                             if (!empNcItemsMap.containsKey(targetNorm)) {
                                                 empNcItemsMap[targetNorm] = mutableListOf()
@@ -853,13 +901,27 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                             masterAllComplaints.addAll(ncList)
                         }
 
+                        val complaintIds = mutableSetOf<String>()
+
                         for (cs in snapshot.children) {
+                            val cId = cs.child("complaintId").getValue(String::class.java) ?: cs.key ?: ""
+                            if (cId.isNotEmpty()) complaintIds.add(cId)
+
                             val assignedRaw = cs.child("assignedTo").getValue(String::class.java) ?: ""
                             val assignedTo = normalizeName(assignedRaw)
-                            val createdTime = cs.child("createdTime").getValue(Long::class.java) ?: 0L
-                            val isNewConn = isNewConnectionNode(cs)
+                            val createdTime = cs.child("createdTime").getValue(Long::class.java)
+                                ?: cs.child("createdTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                            val resolvedTime = cs.child("resolvedTime").getValue(Long::class.java)
+                                ?: cs.child("resolvedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                            val assignedTime = cs.child("assignedTime").getValue(Long::class.java)
+                                ?: cs.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
 
-                            if (createdTime !in selectedStartTime..selectedEndTime) continue
+                            val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)
+                            val inRange = (createdTime in selectedStartTime..selectedEndTime) ||
+                                          (resolvedTime in selectedStartTime..selectedEndTime) ||
+                                          (assignedTime in selectedStartTime..selectedEndTime)
+
+                            if (hasTimestamp && !inRange) continue
                             if (!isAllEmployeesMode && assignedTo.isNotEmpty() && !assignedTo.equals(normalizeName(employeeName), true)) continue
 
                             val userId = cs.child("userId").getValue(String::class.java) ?: ""
@@ -868,6 +930,7 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                             val phoneNumber = cs.child("phoneNumber").getValue(String::class.java) ?: ""
                             val details = cs.child("details").getValue(String::class.java) ?: ""
 
+                            val isNewConn = isNewConnectionNode(cs)
                             if (isNewConn) {
                                 ncCount++
                                 masterAllComplaints.add(
@@ -902,17 +965,86 @@ class EmployeeReportDetailsActivity : AppCompatActivity() {
                             )
                         }
 
-                        // Sort by createdTime ascending (oldest to newest)
-                        masterAllComplaints.sortBy {
-                            it["createdTime"]?.toLongOrNull() ?: 0L
-                        }
+                        FirebaseDatabase.getInstance()
+                            .getReference("resolvedComplaints")
+                            .addListenerForSingleValueEvent(object : ValueEventListener {
+                                override fun onDataChange(resolvedSnapshot: DataSnapshot) {
+                                    for (cs in resolvedSnapshot.children) {
+                                        val complaintId = cs.child("complaintId").getValue(String::class.java) ?: cs.key ?: ""
+                                        if (complaintId.isNotEmpty() && complaintIds.contains(complaintId)) continue
 
-                        val regularCount = masterAllComplaints.count { it["isNcCard"] != "true" }
-                        repeatsFilterText.text = "Total: $regularCount"
-                        ncFilterText.text = "NC: $ncCount"
-                        updateFilterUI()
-                        updateSearchSuggestions()
-                        applyAllComplaintsFilter()
+                                        val assignedRaw = cs.child("assignedTo").getValue(String::class.java) ?: ""
+                                        val assignedTo = normalizeName(assignedRaw)
+                                        val createdTime = cs.child("createdTime").getValue(Long::class.java)
+                                            ?: cs.child("createdTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                                        val resolvedTime = cs.child("resolvedTime").getValue(Long::class.java)
+                                            ?: cs.child("resolvedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+                                        val assignedTime = cs.child("assignedTime").getValue(Long::class.java)
+                                            ?: cs.child("assignedTime").getValue(String::class.java)?.toLongOrNull() ?: 0L
+
+                                        val hasTimestamp = (createdTime > 0L || resolvedTime > 0L || assignedTime > 0L)
+                                        val inRange = (createdTime in selectedStartTime..selectedEndTime) ||
+                                                      (resolvedTime in selectedStartTime..selectedEndTime) ||
+                                                      (assignedTime in selectedStartTime..selectedEndTime)
+
+                                        if (hasTimestamp && !inRange) continue
+                                        if (!isAllEmployeesMode && assignedTo.isNotEmpty() && !assignedTo.equals(normalizeName(employeeName), true)) continue
+
+                                        val userId = cs.child("userId").getValue(String::class.java) ?: ""
+                                        val address = cs.child("address").getValue(String::class.java) ?: ""
+                                        val phoneNumber = cs.child("phoneNumber").getValue(String::class.java) ?: ""
+                                        val details = cs.child("details").getValue(String::class.java) ?: ""
+
+                                        val isNewConn = isNewConnectionNode(cs)
+                                        if (isNewConn) {
+                                            ncCount++
+                                            masterAllComplaints.add(
+                                                mapOf(
+                                                    "type" to "item",
+                                                    "isNcCard" to "true",
+                                                    "ncTag" to "NEW CONNECTION",
+                                                    "userId" to userId.ifEmpty { "New Connection" },
+                                                    "address" to address,
+                                                    "status" to "Resolved",
+                                                    "phoneNumber" to phoneNumber,
+                                                    "createdTime" to createdTime.toString(),
+                                                    "employeeName" to assignedRaw,
+                                                    "details" to details
+                                                )
+                                            )
+                                            continue
+                                        }
+
+                                        masterAllComplaints.add(
+                                            mapOf(
+                                                "type" to "item",
+                                                "isNcCard" to "false",
+                                                "userId" to userId,
+                                                "address" to address,
+                                                "status" to "Resolved",
+                                                "phoneNumber" to phoneNumber,
+                                                "createdTime" to createdTime.toString(),
+                                                "employeeName" to assignedRaw,
+                                                "details" to details
+                                            )
+                                        )
+                                    }
+
+                                    // Sort by createdTime ascending (oldest to newest)
+                                    masterAllComplaints.sortBy {
+                                        it["createdTime"]?.toLongOrNull() ?: 0L
+                                    }
+
+                                    val regularCount = masterAllComplaints.count { it["isNcCard"] != "true" }
+                                    repeatsFilterText.text = "Total: $regularCount"
+                                    ncFilterText.text = "NC: $ncCount"
+                                    updateFilterUI()
+                                    updateSearchSuggestions()
+                                    applyAllComplaintsFilter()
+                                }
+
+                                override fun onCancelled(error: DatabaseError) {}
+                            })
                     }
 
                     override fun onCancelled(error: DatabaseError) {}

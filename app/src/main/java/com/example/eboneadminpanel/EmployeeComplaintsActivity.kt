@@ -149,7 +149,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         val checkedIds = adapter.onlineStatusMap.keys
 
         // 1. EBONE
-        val newEbone = complaintList.filter { 
+        val newEbone = complaintList.filter {
             val company = it.company.trim().uppercase(Locale.US)
             (company == "EBONE" || company == "EBILL" || company == "EBONE (EBILL.PK)") && !checkedIds.contains(it.complaintId)
         }
@@ -164,7 +164,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         }
 
         // 2. WATEEN
-        val newWateen = complaintList.filter { 
+        val newWateen = complaintList.filter {
             val company = it.company.trim().uppercase(Locale.US)
             (company == "WATEEN" || company == "WATEEN.COM") && !checkedIds.contains(it.complaintId)
         }
@@ -179,7 +179,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
         }
 
         // 3. ZONG
-        val newZong = complaintList.filter { 
+        val newZong = complaintList.filter {
             val company = it.company.trim().uppercase(Locale.US)
             (company == "ZONG" || company == "TURBONET.ZONG.COM.PK") && !checkedIds.contains(it.complaintId)
         }
@@ -449,7 +449,6 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
 
         val loginUrl = "https://turbonet.zong.com.pk/login.php"
         val onlineUrl = "https://turbonet.zong.com.pk/radius_online_customers.php"
-        val searchSelector = "input[aria-controls=\"onlinecustomers\"]"
 
         val webView = getOrCreateZongWebView()
 
@@ -492,7 +491,7 @@ class EmployeeComplaintsActivity : AppCompatActivity() {
                     } else {
                         if (!searchAttempted) {
                             searchAttempted = true
-                            webView.evaluateJavascript("(function(){ var box = document.querySelector('$searchSelector'); if(box){ box.value = '${complaint.userId}'; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ if(document.body.innerText.indexOf('${complaint.userId}') > -1){ window.location.href = \"resolve://success\"; } else { window.location.href = \"resolve://failed\"; } }, 3000); } else { window.location.href = \"resolve://failed\"; } })()", null)
+                            webView.evaluateJavascript("(function(){ var targetUser = '${complaint.userId}'.toLowerCase().trim(); var box = document.querySelector('input.form-control.form-control-sm, input[aria-controls=\"onlinecustomers\"]'); if(box){ box.value = ''; box.focus(); box.value = targetUser; box.dispatchEvent(new Event('input', {bubbles:true})); box.dispatchEvent(new Event('keyup', {bubbles:true})); setTimeout(function(){ var table = document.querySelector('table'); var result = 'failed'; if(table){ var emptyRow = table.querySelector('.dataTables_empty'); if(!emptyRow){ var rows = table.querySelectorAll('tbody tr'); for(var i=0; i<rows.length; i++){ var rowText = rows[i].innerText.toLowerCase(); if(rowText.indexOf(targetUser) > -1){ result = 'success'; break; } } } } window.location.href = 'resolve://' + result; }, 3000); } else { window.location.href = 'resolve://failed'; } })();", null)
                         }
                     }
                 }

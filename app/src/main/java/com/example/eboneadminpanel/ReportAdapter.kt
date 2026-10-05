@@ -38,6 +38,8 @@ private const val TYPE_AREA_ITEM = 2
 
 class ReportAdapter(
     private val reportList: MutableList<ReportItem>,
+    private val fromMs: Long = 0L,
+    private val toMs: Long = Long.MAX_VALUE,
     private val onRepeatClick: () -> Unit = {},
     private val onTotalComplaintsClick: () -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -180,7 +182,7 @@ class ReportAdapter(
                 val index = position - 1
 
                 if (index in employees.indices) {
-                    holder.bind(employees[index])
+                    holder.bind(employees[index], fromMs, toMs)
                 }
             }
         }
@@ -291,7 +293,7 @@ class ReportAdapter(
         val todayCountText: TextView =
             itemView.findViewById(R.id.todayCountText)
 
-        fun bind(report: ReportItem) {
+        fun bind(report: ReportItem, fromMs: Long, toMs: Long) {
             employeeNameText.text =
                 "👤 ${report.employeeName}"
 
@@ -362,6 +364,9 @@ class ReportAdapter(
                     true
                 )
 
+                intent.putExtra("fromMs", fromMs)
+                intent.putExtra("toMs", toMs)
+
                 itemView.context.startActivity(intent)
             }
 
@@ -380,6 +385,9 @@ class ReportAdapter(
                     "showRepeat",
                     false
                 )
+
+                intent.putExtra("fromMs", fromMs)
+                intent.putExtra("toMs", toMs)
 
                 itemView.context.startActivity(intent)
             }
